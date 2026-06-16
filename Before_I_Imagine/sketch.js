@@ -704,21 +704,40 @@ function mouseReleased() {
 
 function touchStarted() {
   if (touches.length > 0) {
-    handlePointerPressed(touches[0].x, touches[0].y);
-    return false;
+    let x = touches[0].x;
+    let y = touches[0].y;
+
+    if (page === "draw" && pointInsideDrawingArea(x, y)) {
+      handlePointerPressed(x, y);
+      return false;
+    }
+
+    if (archiveCanPanAt(x, y)) {
+      handlePointerPressed(x, y);
+      return false;
+    }
   }
+
+  return true;
 }
 
 function touchMoved() {
   if (touches.length > 0) {
-    handlePointerDragged(touches[0].x, touches[0].y);
-    return false;
+    let x = touches[0].x;
+    let y = touches[0].y;
+
+    if (isArchivePanning || (page === "draw" && pointInsideDrawingArea(x, y))) {
+      handlePointerDragged(x, y);
+      return false;
+    }
   }
+
+  return true;
 }
 
 function touchEnded() {
   handlePointerReleased();
-  return false;
+  return true;
 }
 
 function handlePointerPressed(x, y) {
