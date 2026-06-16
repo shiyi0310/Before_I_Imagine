@@ -111,8 +111,6 @@ let gridMiniCache = {};
 let archivePan = { x: 0, y: 0 };
 let isArchivePanning = false;
 let lastPanPoint = { x: 0, y: 0 };
-let drawPageScrollY = 0;
-let isDrawPageScrolling = false;
 
 let pd = 1;
 
@@ -133,7 +131,7 @@ function setup() {
   updateHeaderHeight();
   smooth();
 
-  drawingLayer = createGraphics(width, getDrawingContentHeight());
+  drawingLayer = createGraphics(width, height);
   drawingLayer.pixelDensity(pd);
   drawingLayer.clear();
   drawingLayer.smooth();
@@ -453,17 +451,15 @@ function updateButtonVisibility() {
 
 function getDrawingLayout() {
   let mobile = isMobileScreen();
-  let contentH = getDrawingContentHeight();
-  let scrollY = mobile ? drawPageScrollY : 0;
   let margin = mobile ? 18 : 72;
   let pageW = width - margin * 2;
-  let titleY = (mobile ? 34 : 58) - scrollY;
-  let cardY = (mobile ? 88 : 118) - scrollY;
+  let titleY = mobile ? 34 : 58;
+  let cardY = mobile ? 88 : 118;
   let cardH = mobile ? 220 : 174;
   let drawY = cardY + cardH + (mobile ? 22 : 22);
   let toolbarH = mobile ? 142 : 110;
   let footerH = mobile ? 34 : 54;
-  let toolbarY = (mobile ? contentH : height) - toolbarH - footerH - (mobile ? 8 : 0) - scrollY;
+  let toolbarY = height - toolbarH - footerH - (mobile ? 8 : 0);
   let drawH = max(180, toolbarY - drawY - (mobile ? 18 : 22));
 
   return {
@@ -482,19 +478,9 @@ function getDrawingLayout() {
     toolbarY: toolbarY,
     toolbarW: pageW,
     toolbarH: toolbarH,
-    footerY: (mobile ? contentH : height) - footerH - scrollY,
+    footerY: height - footerH,
     footerH: footerH
   };
-}
-
-function getDrawingContentHeight() {
-  if (!isMobileScreen()) return height;
-  return max(height, 1040);
-}
-
-function constrainDrawPageScroll() {
-  let maxScroll = max(0, getDrawingContentHeight() - height);
-  drawPageScrollY = constrain(drawPageScrollY, 0, maxScroll);
 }
 
 function drawDrawingPage() {
@@ -507,7 +493,7 @@ function drawDrawingPage() {
   drawDrawingSurface();
 
   clipRect(drawLayout.drawX, drawLayout.drawY, drawLayout.drawW, drawLayout.drawH);
-  image(drawingLayer, 0, -drawPageScrollY);
+  image(drawingLayer, 0, 0);
   unclip();
 
   drawToolbarPanel();
@@ -730,12 +716,6 @@ function touchStarted() {
       handlePointerPressed(x, y);
       return false;
     }
-
-    if (page === "draw" && isMobileScreen()) {
-      isDrawPageScrolling = true;
-      lastPanPoint = { x: x, y: y };
-      return false;
-    }
   }
 
   return true;
@@ -745,11 +725,6 @@ function touchMoved() {
   if (touches.length > 0) {
     let x = touches[0].x;
     let y = touches[0].y;
-
-    if (isDrawPageScrolling) {
-      handlePointerDragged(x, y);
-      return false;
-    }
 
     if (isArchivePanning || (page === "draw" && pointInsideDrawingArea(x, y))) {
       handlePointerDragged(x, y);
@@ -768,7 +743,7 @@ function touchEnded() {
 function handlePointerPressed(x, y) {
   if (page === "draw" && pointInsideDrawingArea(x, y)) {
     if (currentTool === "bucket") {
-      bucketFillAt(x, isMobileScreen() ? y + drawPageScrollY : y);
+      bucketFillAt(x, y);
       return;
     }
 
@@ -791,15 +766,6 @@ function handlePointerPressed(x, y) {
 }
 
 function handlePointerDragged(x, y) {
-  if (isDrawPageScrolling && page === "draw" && isMobileScreen()) {
-    let dy = y - lastPanPoint.y;
-    drawPageScrollY -= dy;
-    constrainDrawPageScroll();
-    lastPanPoint = { x: x, y: y };
-    layoutInterface();
-    return false;
-  }
-
   if (isArchivePanning && archiveCanPanAt(x, y)) {
     let dx = x - lastPanPoint.x;
     let dy = y - lastPanPoint.y;
@@ -832,10 +798,6 @@ function handlePointerDragged(x, y) {
 }
 
 function handlePointerReleased() {
-  if (isDrawPageScrolling) {
-    isDrawPageScrolling = false;
-  }
-
   if (isArchivePanning) {
     isArchivePanning = false;
   }
@@ -864,13 +826,6 @@ function archiveCanPanAt(x, y) {
 }
 
 function mouseWheel(event) {
-  if (page === "draw" && isMobileScreen()) {
-    drawPageScrollY += event.delta;
-    constrainDrawPageScroll();
-    layoutInterface();
-    return false;
-  }
-
   if (!archiveCanPan()) return;
 
   if (page === "layer") {
@@ -907,7 +862,7 @@ function getArchiveContentHeight() {
 function createPoint(x, y) {
   return {
     x: x,
-    y: page === "draw" && isMobileScreen() ? y + drawPageScrollY : y,
+    y: y,
     t: millis()
   };
 }
@@ -1107,7 +1062,7 @@ function submitDrawing() {
     promptEN: prompts[promptIndex].en,
     promptCN: prompts[promptIndex].cn,
     canvasWidth: width,
-    canvasHeight: drawingLayer.height,
+    canvasHeight: height,
     headerHeight: headerH,
     durationSeconds: Number(duration.toFixed(2)),
     actions: JSON.parse(JSON.stringify(actions))
@@ -2197,10 +2152,9 @@ function exportArchiveJSON() {
 function windowResized() {
   resizeCanvas(windowWidth, windowHeight);
   updateHeaderHeight();
-  constrainDrawPageScroll();
 
   let oldLayer = drawingLayer;
-  drawingLayer = createGraphics(width, getDrawingContentHeight());
+  drawingLayer = createGraphics(width, height);
   drawingLayer.pixelDensity(pd);
   drawingLayer.clear();
   drawingLayer.smooth();
