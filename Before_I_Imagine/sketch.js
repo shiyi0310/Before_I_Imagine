@@ -256,25 +256,25 @@ function layoutInterface() {
 
   if (mobile) {
     let x = drawLayout.toolbarX + 16;
-    let y = drawLayout.toolbarY + 30;
-    let gap = 10;
+    let y = drawLayout.toolbarY + 24;
+    let gap = 8;
     let innerW = drawLayout.toolbarW - 32;
     let toolBtnW = (innerW - gap * 2) / 3;
     let actionBtnW = (innerW - gap) / 2;
 
     colorPicker.position(x, y);
-    colorPicker.size(64, 38);
-    sizeSlider.position(x + 92, y + 10);
-    sizeSlider.size(max(130, innerW - 112));
+    colorPicker.size(58, 34);
+    sizeSlider.position(x + 86, y + 9);
+    sizeSlider.size(max(126, innerW - 106));
 
-    brushBtn.position(x, y + 54);
-    bucketBtn.position(x + (toolBtnW + gap), y + 54);
-    eraserBtn.position(x + (toolBtnW + gap) * 2, y + 54);
+    brushBtn.position(x, y + 46);
+    bucketBtn.position(x + (toolBtnW + gap), y + 46);
+    eraserBtn.position(x + (toolBtnW + gap) * 2, y + 46);
 
-    clearBtn.position(x, y + 106);
-    submitBtn.position(x + actionBtnW + gap, y + 106);
-    nextPromptBtn.position(x, y + 158);
-    archiveBtn.position(x + actionBtnW + gap, y + 158);
+    clearBtn.position(x, y + 94);
+    submitBtn.position(x + actionBtnW + gap, y + 94);
+    nextPromptBtn.position(x, y + 142);
+    archiveBtn.position(x + actionBtnW + gap, y + 142);
 
     backBtn.position(22, 92);
     gridBtn.position(88, 92);
@@ -320,17 +320,17 @@ function layoutInterface() {
   sizeDrawingButton(archiveBtn);
   if (mobile) {
     let innerW = drawLayout.toolbarW - 32;
-    let gap = 10;
+    let gap = 8;
     let toolBtnW = (innerW - gap * 2) / 3;
     let actionBtnW = (innerW - gap) / 2;
 
-    brushBtn.size(toolBtnW, 46);
-    bucketBtn.size(toolBtnW, 46);
-    eraserBtn.size(toolBtnW, 46);
-    clearBtn.size(actionBtnW, 46);
-    submitBtn.size(actionBtnW, 46);
-    nextPromptBtn.size(actionBtnW, 46);
-    archiveBtn.size(actionBtnW, 46);
+    brushBtn.size(toolBtnW, 40);
+    bucketBtn.size(toolBtnW, 40);
+    eraserBtn.size(toolBtnW, 40);
+    clearBtn.size(actionBtnW, 40);
+    submitBtn.size(actionBtnW, 40);
+    nextPromptBtn.size(actionBtnW, 40);
+    archiveBtn.size(actionBtnW, 40);
   }
   sizeArchiveButton(backBtn);
   sizeArchiveButton(gridBtn);
@@ -368,10 +368,10 @@ function applyCanvasTypography() {
 
 function sizeDrawingButton(btn) {
   let mobile = isMobileScreen();
-  btn.size(mobile ? 96 : 100, mobile ? 46 : 58);
-  btn.style("font-size", mobile ? "14px" : "14px");
-  btn.style("height", mobile ? "46px" : "58px");
-  btn.style("padding", mobile ? "5px 8px" : "6px 12px");
+  btn.size(mobile ? 88 : 100, mobile ? 40 : 58);
+  btn.style("font-size", mobile ? "13px" : "14px");
+  btn.style("height", mobile ? "40px" : "58px");
+  btn.style("padding", mobile ? "3px 6px" : "6px 12px");
   btn.style("border", "1px solid #2b2926");
 }
 
@@ -457,8 +457,8 @@ function getDrawingLayout() {
   let cardY = mobile ? 88 : 118;
   let cardH = mobile ? 220 : 174;
   let drawY = cardY + cardH + (mobile ? 22 : 22);
-  let toolbarH = mobile ? 252 : 110;
-  let footerH = mobile ? 60 : 54;
+  let toolbarH = mobile ? 224 : 110;
+  let footerH = mobile ? 54 : 54;
   let toolbarY = height - toolbarH - footerH - (mobile ? 8 : 0);
   let drawH = max(180, toolbarY - drawY - (mobile ? 18 : 22));
 
@@ -662,8 +662,8 @@ function drawToolbarPanel() {
   fill(inkCol);
   textAlign(LEFT);
   textSize(12);
-  text("Colour", x + 36, y + 34);
-  text("Thickness", x + (isMobileScreen() ? 92 : 148), y + 34);
+  text("Colour", x + 36, y + (isMobileScreen() ? 28 : 34));
+  text("Thickness", x + (isMobileScreen() ? 92 : 148), y + (isMobileScreen() ? 28 : 34));
 
   if (!isMobileScreen()) {
     stroke(lineCol);
