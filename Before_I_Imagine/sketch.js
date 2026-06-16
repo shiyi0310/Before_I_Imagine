@@ -114,7 +114,7 @@ let lastPanPoint = { x: 0, y: 0 };
 
 let pd = 1;
 
-async function setup() {
+function setup() {
   document.body.style.margin = "0";
   document.body.style.overflow = "hidden";
   document.body.style.position = "fixed";
@@ -136,8 +136,11 @@ async function setup() {
   drawingLayer.clear();
   drawingLayer.smooth();
 
-  await loadArchive();
-  refreshArchiveViews();
+  loadArchive().then(() => {
+    refreshArchiveViews();
+  }).catch((error) => {
+    console.warn("Cloud archive loading failed:", error);
+  });
 
   createInterface();
   layoutInterface();
@@ -965,7 +968,7 @@ function sameFillTarget(c1, c2) {
 // SUBMIT / SAVE / LOAD
 // -------------------------
 
-async function submitDrawing() {
+function submitDrawing() {
   if (actions.length === 0) {
     alert("Please draw something first.");
     return;
@@ -988,8 +991,8 @@ async function submitDrawing() {
 
   archive.push(drawingData);
   saveArchive();
-  await saveDrawingToCloud(drawingData);
   refreshArchiveViews();
+  saveDrawingToCloud(drawingData);
 
   alert("Drawing saved.");
   clearDrawing();
@@ -1023,7 +1026,7 @@ async function loadArchive() {
     if (response.ok) {
       const cloudArchive = await response.json();
       if (Array.isArray(cloudArchive)) {
-        archive = cloudArchive.map(normalizeDrawingData);
+        archive = cloudArchive.map(normalizeDrawingData).filter(Boolean);
         saveArchive();
         return;
       }
@@ -1045,7 +1048,7 @@ async function loadArchive() {
     }
 
     if (saved) {
-      archive = JSON.parse(saved).map(normalizeDrawingData);
+      archive = JSON.parse(saved).map(normalizeDrawingData).filter(Boolean);
       saveArchive();
     } else {
       archive = [];
