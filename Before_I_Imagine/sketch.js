@@ -176,6 +176,10 @@ function createInterface() {
 
   sizeSlider = createSlider(1, 45, 5, 1);
   sizeSlider.size(120);
+  colorPicker.style("z-index", "20");
+  sizeSlider.style("z-index", "20");
+  colorPicker.style("touch-action", "manipulation");
+  sizeSlider.style("touch-action", "manipulation");
 
   brushBtn = createButton("Brush<br>画笔");
   brushBtn.mousePressed(() => currentTool = "brush");
@@ -252,24 +256,25 @@ function layoutInterface() {
 
   if (mobile) {
     let x = drawLayout.toolbarX + 16;
-    let y = drawLayout.toolbarY + 34;
-    let gap = 8;
-    let toolBtnW = min(94, (drawLayout.toolbarW - 48 - gap * 2) / 3);
-    let actionBtnW = (drawLayout.toolbarW - 32 - gap * 3) / 4;
+    let y = drawLayout.toolbarY + 30;
+    let gap = 10;
+    let innerW = drawLayout.toolbarW - 32;
+    let toolBtnW = (innerW - gap * 2) / 3;
+    let actionBtnW = (innerW - gap) / 2;
 
     colorPicker.position(x, y);
-    colorPicker.size(58, 34);
-    sizeSlider.position(x + 86, y + 8);
-    sizeSlider.size(min(145, drawLayout.toolbarW - 126));
+    colorPicker.size(64, 38);
+    sizeSlider.position(x + 92, y + 10);
+    sizeSlider.size(max(130, innerW - 112));
 
-    brushBtn.position(x, y + 48);
-    bucketBtn.position(x + (toolBtnW + gap), y + 48);
-    eraserBtn.position(x + (toolBtnW + gap) * 2, y + 48);
+    brushBtn.position(x, y + 54);
+    bucketBtn.position(x + (toolBtnW + gap), y + 54);
+    eraserBtn.position(x + (toolBtnW + gap) * 2, y + 54);
 
-    clearBtn.position(x, y + 98);
-    submitBtn.position(x + (actionBtnW + gap), y + 98);
-    nextPromptBtn.position(x + (actionBtnW + gap) * 2, y + 98);
-    archiveBtn.position(x + (actionBtnW + gap) * 3, y + 98);
+    clearBtn.position(x, y + 106);
+    submitBtn.position(x + actionBtnW + gap, y + 106);
+    nextPromptBtn.position(x, y + 158);
+    archiveBtn.position(x + actionBtnW + gap, y + 158);
 
     backBtn.position(22, 92);
     gridBtn.position(88, 92);
@@ -313,6 +318,20 @@ function layoutInterface() {
   sizeDrawingButton(submitBtn);
   sizeDrawingButton(nextPromptBtn);
   sizeDrawingButton(archiveBtn);
+  if (mobile) {
+    let innerW = drawLayout.toolbarW - 32;
+    let gap = 10;
+    let toolBtnW = (innerW - gap * 2) / 3;
+    let actionBtnW = (innerW - gap) / 2;
+
+    brushBtn.size(toolBtnW, 46);
+    bucketBtn.size(toolBtnW, 46);
+    eraserBtn.size(toolBtnW, 46);
+    clearBtn.size(actionBtnW, 46);
+    submitBtn.size(actionBtnW, 46);
+    nextPromptBtn.size(actionBtnW, 46);
+    archiveBtn.size(actionBtnW, 46);
+  }
   sizeArchiveButton(backBtn);
   sizeArchiveButton(gridBtn);
   sizeArchiveButton(wallBtn);
@@ -335,6 +354,7 @@ function styleButton(btn) {
   btn.style("white-space", "nowrap");
   btn.style("cursor", "pointer");
   btn.style("outline-color", "rgba(80, 72, 62, 0.35)");
+  btn.style("z-index", "20");
   btn.attribute("translate", "no");
   btn.style("touch-action", "manipulation");
 }
@@ -348,10 +368,10 @@ function applyCanvasTypography() {
 
 function sizeDrawingButton(btn) {
   let mobile = isMobileScreen();
-  btn.size(mobile ? 82 : 100, mobile ? 42 : 58);
-  btn.style("font-size", mobile ? "13px" : "14px");
-  btn.style("height", mobile ? "42px" : "58px");
-  btn.style("padding", mobile ? "4px 7px" : "6px 12px");
+  btn.size(mobile ? 96 : 100, mobile ? 46 : 58);
+  btn.style("font-size", mobile ? "14px" : "14px");
+  btn.style("height", mobile ? "46px" : "58px");
+  btn.style("padding", mobile ? "5px 8px" : "6px 12px");
   btn.style("border", "1px solid #2b2926");
 }
 
@@ -433,12 +453,12 @@ function getDrawingLayout() {
   let mobile = isMobileScreen();
   let margin = mobile ? 18 : 72;
   let pageW = width - margin * 2;
-  let titleY = mobile ? 32 : 58;
-  let cardY = mobile ? 82 : 118;
-  let cardH = mobile ? 200 : 174;
+  let titleY = mobile ? 34 : 58;
+  let cardY = mobile ? 88 : 118;
+  let cardH = mobile ? 220 : 174;
   let drawY = cardY + cardH + (mobile ? 22 : 22);
-  let toolbarH = mobile ? 190 : 110;
-  let footerH = mobile ? 52 : 54;
+  let toolbarH = mobile ? 252 : 110;
+  let footerH = mobile ? 60 : 54;
   let toolbarY = height - toolbarH - footerH - (mobile ? 8 : 0);
   let drawH = max(180, toolbarY - drawY - (mobile ? 18 : 22));
 
@@ -491,13 +511,13 @@ function drawDrawingTitle() {
   noStroke();
   fill(inkCol);
   textStyle(NORMAL);
-  textSize(isMobileScreen() ? 24 : 34);
+  textSize(isMobileScreen() ? 26 : 34);
   drawingContext.letterSpacing = isMobileScreen() ? "1.2px" : "2.2px";
   text("BEFORE I IMAGINE", width / 2, drawLayout.titleY);
   drawingContext.letterSpacing = "0px";
 
   fill(92);
-  textSize(isMobileScreen() ? 12 : 16);
+  textSize(isMobileScreen() ? 14 : 16);
   text("A sensory drawing experiment", width / 2, drawLayout.titleY + (isMobileScreen() ? 24 : 34));
 }
 
@@ -515,23 +535,23 @@ function drawPromptCard(p) {
   if (mobile) {
     fill(mutedCol);
     textAlign(LEFT);
-    textSize(11);
+    textSize(13);
     text(p.task, x + 18, y + 26);
 
     fill(inkCol);
-    textSize(17);
-    textLeading(21);
+    textSize(19);
+    textLeading(23);
     text(p.en, x + 18, y + 64, w - 44);
     fill(60);
-    textSize(13);
-    textLeading(18);
+    textSize(15);
+    textLeading(20);
     text(p.cn, x + 18, y + 112, w - 44);
 
     fill(105);
-    textSize(10.5);
-    textLeading(16);
-    text(p.noteEn, x + 18, y + 140, w - 44);
-    text(p.noteCn, x + 18, y + 164, w - 44);
+    textSize(12);
+    textLeading(17);
+    text(p.noteEn, x + 18, y + 150, w - 44);
+    text(p.noteCn, x + 18, y + 176, w - 44);
   } else {
     fill(mutedCol);
     textAlign(CENTER);
@@ -656,7 +676,7 @@ function drawDrawingFooter() {
   fill(116);
   noStroke();
   textAlign(CENTER);
-  textSize(isMobileScreen() ? 11 : 13);
+  textSize(isMobileScreen() ? 12 : 13);
   if (isMobileScreen()) {
     text("Draw above. Submit when finished.", width / 2, drawLayout.footerY + 18);
     text(`${archive.length} drawings saved   已保存 ${archive.length} 张`, width / 2, drawLayout.footerY + 38);
