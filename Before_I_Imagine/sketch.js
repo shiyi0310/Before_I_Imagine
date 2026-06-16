@@ -114,7 +114,7 @@ let lastPanPoint = { x: 0, y: 0 };
 
 let pd = 1;
 
-function setup() {
+async function setup() {
   document.body.style.margin = "0";
   document.body.style.overflow = "hidden";
   document.body.style.position = "fixed";
@@ -136,8 +136,8 @@ function setup() {
   drawingLayer.clear();
   drawingLayer.smooth();
 
-  loadArchive();
-  generateArchiveWallLayout();
+  await loadArchive();
+  refreshArchiveViews();
 
   createInterface();
   layoutInterface();
@@ -965,7 +965,7 @@ function sameFillTarget(c1, c2) {
 // SUBMIT / SAVE / LOAD
 // -------------------------
 
-function submitDrawing() {
+async function submitDrawing() {
   if (actions.length === 0) {
     alert("Please draw something first.");
     return;
@@ -988,10 +988,8 @@ function submitDrawing() {
 
   archive.push(drawingData);
   saveArchive();
-  clearGridMiniCache();
-  generateArchiveWallLayout();
-  calculateMaxLayerUnits();
-  generateLayerLayout();
+  await saveDrawingToCloud(drawingData);
+  refreshArchiveViews();
 
   alert("Drawing saved.");
   clearDrawing();
@@ -1011,26 +1009,76 @@ function nextPrompt() {
 }
 
 function saveArchive() {
-  localStorage.setItem(storageKey, JSON.stringify(archive));
+  try {
+    localStorage.setItem(storageKey, JSON.stringify(archive));
+  } catch (error) {
+    console.warn("Could not save archive to localStorage:", error);
+  }
 }
 
-function loadArchive() {
-  let saved = localStorage.getItem(storageKey);
+async function loadArchive() {
+  try {
+    const response = await fetch("/api/drawings");
 
-  if (!saved) {
-    for (let key of oldStorageKeys) {
-      saved = localStorage.getItem(key);
-      if (saved) break;
+    if (response.ok) {
+      const cloudArchive = await response.json();
+      if (Array.isArray(cloudArchive)) {
+        archive = cloudArchive.map(normalizeDrawingData);
+        saveArchive();
+        return;
+      }
+    } else {
+      console.warn("Cloud archive request failed:", await response.text());
     }
+  } catch (error) {
+    console.warn("Could not load archive from server. Falling back to localStorage:", error);
   }
 
-  if (saved) {
-    archive = JSON.parse(saved);
-    archive = archive.map(normalizeDrawingData);
-    saveArchive();
-  } else {
+  try {
+    let saved = localStorage.getItem(storageKey);
+
+    if (!saved) {
+      for (let key of oldStorageKeys) {
+        saved = localStorage.getItem(key);
+        if (saved) break;
+      }
+    }
+
+    if (saved) {
+      archive = JSON.parse(saved).map(normalizeDrawingData);
+      saveArchive();
+    } else {
+      archive = [];
+    }
+  } catch (error) {
+    console.warn("Could not load archive from localStorage:", error);
     archive = [];
   }
+}
+
+async function saveDrawingToCloud(drawingData) {
+  try {
+    const response = await fetch("/api/drawings", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(drawingData)
+    });
+
+    if (!response.ok) {
+      throw new Error(await response.text());
+    }
+  } catch (error) {
+    console.warn("Could not save drawing to server. It is still saved locally:", error);
+  }
+}
+
+function refreshArchiveViews() {
+  clearGridMiniCache();
+  generateArchiveWallLayout();
+  calculateMaxLayerUnits();
+  generateLayerLayout();
 }
 
 function normalizeDrawingData(d) {
@@ -1080,8 +1128,7 @@ function clearArchive() {
     localStorage.removeItem(key);
   }
 
-  generateArchiveWallLayout();
-  calculateMaxLayerUnits();
+  refreshArchiveViews();
 }
 
 // -------------------------
