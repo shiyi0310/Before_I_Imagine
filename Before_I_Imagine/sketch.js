@@ -262,9 +262,9 @@ function layoutInterface() {
     let toolBtnW = (innerW - gap * 2) / 3;
     let actionBtnW = (innerW - gap * 3) / 4;
 
-    colorPicker.position(x, y);
+    colorPicker.position(x, y + 18);
     colorPicker.size(48, 28);
-    sizeSlider.position(x + 70, y + 7);
+    sizeSlider.position(x + 70, y + 23);
     sizeSlider.size(max(112, innerW - 86));
 
     brushBtn.position(x, y + 38);
@@ -548,10 +548,10 @@ function drawPromptCard(p) {
     text(p.cn, x + 18, y + 112, w - 44);
 
     fill(105);
-    textSize(12);
-    textLeading(17);
-    text(p.noteEn, x + 18, y + 150, w - 44);
-    text(p.noteCn, x + 18, y + 176, w - 44);
+    textSize(11);
+    textLeading(16);
+    text(p.noteEn, x + 18, y + 148, w - 64);
+    text(p.noteCn, x + 18, y + 176, w - 64);
   } else {
     fill(mutedCol);
     textAlign(CENTER);
@@ -662,8 +662,8 @@ function drawToolbarPanel() {
   fill(inkCol);
   textAlign(LEFT);
   textSize(12);
-  text("Colour", x + 36, y + (isMobileScreen() ? 22 : 34));
-  text("Thickness", x + (isMobileScreen() ? 76 : 148), y + (isMobileScreen() ? 22 : 34));
+  text("Colour", x + 6, y + (isMobileScreen() ? 14 : 34));
+  text("Thickness", x + (isMobileScreen() ? 70 : 148), y + (isMobileScreen() ? 14 : 34));
 
   if (!isMobileScreen()) {
     stroke(lineCol);
