@@ -256,25 +256,25 @@ function layoutInterface() {
 
   if (mobile) {
     let x = drawLayout.toolbarX + 16;
-    let y = drawLayout.toolbarY + 24;
-    let gap = 8;
+    let y = drawLayout.toolbarY + 14;
+    let gap = 6;
     let innerW = drawLayout.toolbarW - 32;
     let toolBtnW = (innerW - gap * 2) / 3;
-    let actionBtnW = (innerW - gap) / 2;
+    let actionBtnW = (innerW - gap * 3) / 4;
 
     colorPicker.position(x, y);
-    colorPicker.size(58, 34);
-    sizeSlider.position(x + 86, y + 9);
-    sizeSlider.size(max(126, innerW - 106));
+    colorPicker.size(48, 28);
+    sizeSlider.position(x + 70, y + 7);
+    sizeSlider.size(max(112, innerW - 86));
 
-    brushBtn.position(x, y + 46);
-    bucketBtn.position(x + (toolBtnW + gap), y + 46);
-    eraserBtn.position(x + (toolBtnW + gap) * 2, y + 46);
+    brushBtn.position(x, y + 38);
+    bucketBtn.position(x + (toolBtnW + gap), y + 38);
+    eraserBtn.position(x + (toolBtnW + gap) * 2, y + 38);
 
-    clearBtn.position(x, y + 94);
-    submitBtn.position(x + actionBtnW + gap, y + 94);
-    nextPromptBtn.position(x, y + 142);
-    archiveBtn.position(x + actionBtnW + gap, y + 142);
+    clearBtn.position(x, y + 78);
+    submitBtn.position(x + (actionBtnW + gap), y + 78);
+    nextPromptBtn.position(x + (actionBtnW + gap) * 2, y + 78);
+    archiveBtn.position(x + (actionBtnW + gap) * 3, y + 78);
 
     backBtn.position(22, 92);
     gridBtn.position(88, 92);
@@ -320,17 +320,17 @@ function layoutInterface() {
   sizeDrawingButton(archiveBtn);
   if (mobile) {
     let innerW = drawLayout.toolbarW - 32;
-    let gap = 8;
+    let gap = 6;
     let toolBtnW = (innerW - gap * 2) / 3;
-    let actionBtnW = (innerW - gap) / 2;
+    let actionBtnW = (innerW - gap * 3) / 4;
 
-    brushBtn.size(toolBtnW, 40);
-    bucketBtn.size(toolBtnW, 40);
-    eraserBtn.size(toolBtnW, 40);
-    clearBtn.size(actionBtnW, 40);
-    submitBtn.size(actionBtnW, 40);
-    nextPromptBtn.size(actionBtnW, 40);
-    archiveBtn.size(actionBtnW, 40);
+    brushBtn.size(toolBtnW, 34);
+    bucketBtn.size(toolBtnW, 34);
+    eraserBtn.size(toolBtnW, 34);
+    clearBtn.size(actionBtnW, 34);
+    submitBtn.size(actionBtnW, 34);
+    nextPromptBtn.size(actionBtnW, 34);
+    archiveBtn.size(actionBtnW, 34);
   }
   sizeArchiveButton(backBtn);
   sizeArchiveButton(gridBtn);
@@ -368,10 +368,10 @@ function applyCanvasTypography() {
 
 function sizeDrawingButton(btn) {
   let mobile = isMobileScreen();
-  btn.size(mobile ? 88 : 100, mobile ? 40 : 58);
-  btn.style("font-size", mobile ? "13px" : "14px");
-  btn.style("height", mobile ? "40px" : "58px");
-  btn.style("padding", mobile ? "3px 6px" : "6px 12px");
+  btn.size(mobile ? 72 : 100, mobile ? 34 : 58);
+  btn.style("font-size", mobile ? "11px" : "14px");
+  btn.style("height", mobile ? "34px" : "58px");
+  btn.style("padding", mobile ? "2px 4px" : "6px 12px");
   btn.style("border", "1px solid #2b2926");
 }
 
@@ -457,8 +457,8 @@ function getDrawingLayout() {
   let cardY = mobile ? 88 : 118;
   let cardH = mobile ? 220 : 174;
   let drawY = cardY + cardH + (mobile ? 22 : 22);
-  let toolbarH = mobile ? 224 : 110;
-  let footerH = mobile ? 54 : 54;
+  let toolbarH = mobile ? 142 : 110;
+  let footerH = mobile ? 34 : 54;
   let toolbarY = height - toolbarH - footerH - (mobile ? 8 : 0);
   let drawH = max(180, toolbarY - drawY - (mobile ? 18 : 22));
 
@@ -662,8 +662,8 @@ function drawToolbarPanel() {
   fill(inkCol);
   textAlign(LEFT);
   textSize(12);
-  text("Colour", x + 36, y + (isMobileScreen() ? 28 : 34));
-  text("Thickness", x + (isMobileScreen() ? 92 : 148), y + (isMobileScreen() ? 28 : 34));
+  text("Colour", x + 36, y + (isMobileScreen() ? 22 : 34));
+  text("Thickness", x + (isMobileScreen() ? 76 : 148), y + (isMobileScreen() ? 22 : 34));
 
   if (!isMobileScreen()) {
     stroke(lineCol);
@@ -676,10 +676,10 @@ function drawDrawingFooter() {
   fill(116);
   noStroke();
   textAlign(CENTER);
-  textSize(isMobileScreen() ? 12 : 13);
+  textSize(isMobileScreen() ? 9 : 13);
   if (isMobileScreen()) {
-    text("Draw above. Submit when finished.", width / 2, drawLayout.footerY + 18);
-    text(`${archive.length} drawings saved   已保存 ${archive.length} 张`, width / 2, drawLayout.footerY + 38);
+    text("Draw above. Submit when finished.", width / 2, drawLayout.footerY + 12);
+    text(`${archive.length} drawings saved   已保存 ${archive.length} 张`, width / 2, drawLayout.footerY + 26);
   } else {
     text("Draw anywhere in the area above the prompt. Submit when finished.", width / 2, drawLayout.footerY + 20);
     text(`请在提示区域上方的画布中作画。完成后提交。   |   ${archive.length} drawings saved   已保存 ${archive.length} 张`, width / 2, drawLayout.footerY + 42);
