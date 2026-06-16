@@ -263,7 +263,7 @@ function layoutInterface() {
 
     brushBtn.position(x, y + 48);
     bucketBtn.position(x + (btnW + gap), y + 48);
-    eraserBtn.position(x + (btnW + gap), y + 48);
+    eraserBtn.position(x + (btnW + gap) * 2, y + 48);
 
     clearBtn.position(x, y + 84);
     submitBtn.position(x + (btnW + gap), y + 84);
@@ -290,7 +290,7 @@ function layoutInterface() {
     let toolX = x + 320;
     brushBtn.position(toolX, y);
     bucketBtn.position(toolX + (btnW + gap), y);
-    eraserBtn.position(toolX + (btnW + gap), y);
+    eraserBtn.position(toolX + (btnW + gap) * 2, y);
 
     let actionX = min(x + 600, drawLayout.toolbarX + drawLayout.toolbarW - (btnW * 4 + gap * 3) - 36);
     clearBtn.position(actionX, y);
@@ -388,7 +388,7 @@ function updateButtonVisibility() {
     sizeSlider.show();
 
     brushBtn.show();
-    bucketBtn.hide();
+    bucketBtn.show();
     eraserBtn.show();
 
     clearBtn.show();
