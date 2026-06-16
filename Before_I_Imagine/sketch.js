@@ -254,21 +254,22 @@ function layoutInterface() {
     let x = drawLayout.toolbarX + 16;
     let y = drawLayout.toolbarY + 34;
     let gap = 8;
-    let btnW = max(66, (drawLayout.toolbarW - 42) / 4);
+    let toolBtnW = min(94, (drawLayout.toolbarW - 48 - gap * 2) / 3);
+    let actionBtnW = (drawLayout.toolbarW - 32 - gap * 3) / 4;
 
     colorPicker.position(x, y);
-    colorPicker.size(48, 30);
-    sizeSlider.position(x + 74, y + 5);
-    sizeSlider.size(min(120, drawLayout.toolbarW - 110));
+    colorPicker.size(58, 34);
+    sizeSlider.position(x + 86, y + 8);
+    sizeSlider.size(min(145, drawLayout.toolbarW - 126));
 
     brushBtn.position(x, y + 48);
-    bucketBtn.position(x + (btnW + gap), y + 48);
-    eraserBtn.position(x + (btnW + gap) * 2, y + 48);
+    bucketBtn.position(x + (toolBtnW + gap), y + 48);
+    eraserBtn.position(x + (toolBtnW + gap) * 2, y + 48);
 
-    clearBtn.position(x, y + 84);
-    submitBtn.position(x + (btnW + gap), y + 84);
-    nextPromptBtn.position(x + (btnW + gap) * 2, y + 84);
-    archiveBtn.position(x + (btnW + gap) * 3, y + 84);
+    clearBtn.position(x, y + 98);
+    submitBtn.position(x + (actionBtnW + gap), y + 98);
+    nextPromptBtn.position(x + (actionBtnW + gap) * 2, y + 98);
+    archiveBtn.position(x + (actionBtnW + gap) * 3, y + 98);
 
     backBtn.position(22, 92);
     gridBtn.position(88, 92);
@@ -279,20 +280,20 @@ function layoutInterface() {
   } else {
     let y = drawLayout.toolbarY + 32;
     let x = drawLayout.toolbarX + 38;
-    let gap = 14;
-    let btnW = 100;
+    let gap = 12;
+    let btnW = min(100, max(82, (drawLayout.toolbarW - 480) / 7));
 
     colorPicker.position(x, y + 20);
     colorPicker.size(70, 36);
     sizeSlider.position(x + 118, y + 28);
     sizeSlider.size(180);
 
-    let toolX = x + 320;
+    let toolX = x + 300;
     brushBtn.position(toolX, y);
     bucketBtn.position(toolX + (btnW + gap), y);
     eraserBtn.position(toolX + (btnW + gap) * 2, y);
 
-    let actionX = min(x + 600, drawLayout.toolbarX + drawLayout.toolbarW - (btnW * 4 + gap * 3) - 36);
+    let actionX = min(toolX + (btnW + gap) * 3 + 34, drawLayout.toolbarX + drawLayout.toolbarW - (btnW * 4 + gap * 3) - 36);
     clearBtn.position(actionX, y);
     submitBtn.position(actionX + (btnW + gap), y);
     nextPromptBtn.position(actionX + (btnW + gap) * 2, y);
@@ -347,10 +348,10 @@ function applyCanvasTypography() {
 
 function sizeDrawingButton(btn) {
   let mobile = isMobileScreen();
-  btn.size(mobile ? 70 : 100, mobile ? 36 : 58);
-  btn.style("font-size", mobile ? "11px" : "14px");
-  btn.style("height", mobile ? "36px" : "58px");
-  btn.style("padding", mobile ? "3px 6px" : "6px 12px");
+  btn.size(mobile ? 82 : 100, mobile ? 42 : 58);
+  btn.style("font-size", mobile ? "13px" : "14px");
+  btn.style("height", mobile ? "42px" : "58px");
+  btn.style("padding", mobile ? "4px 7px" : "6px 12px");
   btn.style("border", "1px solid #2b2926");
 }
 
@@ -436,7 +437,7 @@ function getDrawingLayout() {
   let cardY = mobile ? 82 : 118;
   let cardH = mobile ? 200 : 174;
   let drawY = cardY + cardH + (mobile ? 22 : 22);
-  let toolbarH = mobile ? 164 : 110;
+  let toolbarH = mobile ? 190 : 110;
   let footerH = mobile ? 52 : 54;
   let toolbarY = height - toolbarH - footerH - (mobile ? 8 : 0);
   let drawH = max(180, toolbarY - drawY - (mobile ? 18 : 22));
@@ -670,9 +671,40 @@ function drawDrawingFooter() {
 // -------------------------
 
 function mousePressed() {
-  if (page === "draw" && mouseInsideDrawingArea()) {
+  handlePointerPressed(mouseX, mouseY);
+}
+
+function mouseDragged() {
+  handlePointerDragged(mouseX, mouseY);
+}
+
+function mouseReleased() {
+  handlePointerReleased();
+}
+
+function touchStarted() {
+  if (touches.length > 0) {
+    handlePointerPressed(touches[0].x, touches[0].y);
+    return false;
+  }
+}
+
+function touchMoved() {
+  if (touches.length > 0) {
+    handlePointerDragged(touches[0].x, touches[0].y);
+    return false;
+  }
+}
+
+function touchEnded() {
+  handlePointerReleased();
+  return false;
+}
+
+function handlePointerPressed(x, y) {
+  if (page === "draw" && pointInsideDrawingArea(x, y)) {
     if (currentTool === "bucket") {
-      bucketFillAt(mouseX, mouseY);
+      bucketFillAt(x, y);
       return;
     }
 
@@ -685,19 +717,19 @@ function mousePressed() {
         points: []
       };
 
-      let p = createPoint(mouseX, mouseY);
+      let p = createPoint(x, y);
       currentAction.points.push(p);
     }
-  } else if (archiveCanPan()) {
+  } else if (archiveCanPanAt(x, y)) {
     isArchivePanning = true;
-    lastPanPoint = { x: mouseX, y: mouseY };
+    lastPanPoint = { x: x, y: y };
   }
 }
 
-function mouseDragged() {
-  if (isArchivePanning && archiveCanPan()) {
-    let dx = mouseX - lastPanPoint.x;
-    let dy = mouseY - lastPanPoint.y;
+function handlePointerDragged(x, y) {
+  if (isArchivePanning && archiveCanPanAt(x, y)) {
+    let dx = x - lastPanPoint.x;
+    let dy = y - lastPanPoint.y;
 
     if (page === "layer") {
       archivePan.x = constrain(archivePan.x + dx * 0.35, -width * 0.12, width * 0.12);
@@ -707,15 +739,15 @@ function mouseDragged() {
 
     archivePan.y += dy;
     constrainArchivePan();
-    lastPanPoint = { x: mouseX, y: mouseY };
+    lastPanPoint = { x: x, y: y };
     return false;
   }
 
-  if (page === "draw" && mouseInsideDrawingArea()) {
+  if (page === "draw" && pointInsideDrawingArea(x, y)) {
     if (!currentAction) return;
     if (currentAction.type !== "stroke") return;
 
-    let p = createPoint(mouseX, mouseY);
+    let p = createPoint(x, y);
     currentAction.points.push(p);
 
     if (currentAction.points.length > 1) {
@@ -726,7 +758,7 @@ function mouseDragged() {
   }
 }
 
-function mouseReleased() {
+function handlePointerReleased() {
   if (isArchivePanning) {
     isArchivePanning = false;
   }
@@ -743,10 +775,14 @@ function mouseReleased() {
 }
 
 function archiveCanPan() {
+  return archiveCanPanAt(mouseX, mouseY);
+}
+
+function archiveCanPanAt(x, y) {
   return (
     (page === "archiveGrid" || page === "archiveWall" || page === "layer") &&
-    mouseY > archiveHeaderHeight() &&
-    mouseY < height - 58
+    y > archiveHeaderHeight() &&
+    y < height - 58
   );
 }
 
@@ -793,12 +829,16 @@ function createPoint(x, y) {
 }
 
 function mouseInsideDrawingArea() {
+  return pointInsideDrawingArea(mouseX, mouseY);
+}
+
+function pointInsideDrawingArea(x, y) {
   drawLayout = getDrawingLayout();
   return (
-    mouseX >= drawLayout.drawX &&
-    mouseX <= drawLayout.drawX + drawLayout.drawW &&
-    mouseY >= drawLayout.drawY &&
-    mouseY <= drawLayout.drawY + drawLayout.drawH
+    x >= drawLayout.drawX &&
+    x <= drawLayout.drawX + drawLayout.drawW &&
+    y >= drawLayout.drawY &&
+    y <= drawLayout.drawY + drawLayout.drawH
   );
 }
 
