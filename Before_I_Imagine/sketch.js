@@ -1048,9 +1048,18 @@ function sameFillTarget(c1, c2) {
 // -------------------------
 
 function submitDrawing() {
-  if (actions.length === 0) {
+  if (!saveCurrentDrawing()) {
     alert("Please draw something first.");
     return;
+  }
+
+  alert("Drawing saved.");
+  advancePrompt();
+}
+
+function saveCurrentDrawing() {
+  if (actions.length === 0) {
+    return false;
   }
 
   let duration = (millis() - startTime) / 1000;
@@ -1073,9 +1082,7 @@ function submitDrawing() {
   refreshArchiveViews();
   saveDrawingToCloud(drawingData);
 
-  alert("Drawing saved.");
-  clearDrawing();
-  nextPrompt();
+  return true;
 }
 
 function clearDrawing() {
@@ -1086,6 +1093,14 @@ function clearDrawing() {
 }
 
 function nextPrompt() {
+  if (actions.length > 0) {
+    saveCurrentDrawing();
+  }
+
+  advancePrompt();
+}
+
+function advancePrompt() {
   promptIndex = (promptIndex + 1) % prompts.length;
   clearDrawing();
 }
