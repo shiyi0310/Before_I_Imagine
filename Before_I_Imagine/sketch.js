@@ -65,6 +65,7 @@ let sizeSlider;
 let brushBtn;
 let bucketBtn;
 let eraserBtn;
+let undoBtn;
 let bgCol = "#f4f1eb";
 let paperCol = "#fbfaf6";
 let inkCol = "#161616";
@@ -190,6 +191,9 @@ function createInterface() {
   eraserBtn = createButton("Eraser<br>橡皮擦");
   eraserBtn.mousePressed(() => currentTool = "eraser");
 
+  undoBtn = createButton("Undo<br>撤回");
+  undoBtn.mousePressed(undoLastAction);
+
   clearBtn = createButton("Clear<br>清除");
   clearBtn.mousePressed(clearDrawing);
 
@@ -240,7 +244,7 @@ function createInterface() {
   //clearArchiveBtn.mousePressed(clearArchive);
 
   let allBtns = [
-  brushBtn, bucketBtn, eraserBtn,
+  brushBtn, bucketBtn, eraserBtn, undoBtn,
   clearBtn, submitBtn, nextPromptBtn, archiveBtn,
   backBtn, gridBtn, wallBtn, layerBtn, exportBtn
   ];
@@ -256,25 +260,27 @@ function layoutInterface() {
 
   if (mobile) {
     let x = drawLayout.toolbarX + 16;
-    let y = drawLayout.toolbarY + 14;
+    let y = drawLayout.toolbarY + 8;
     let gap = 6;
     let innerW = drawLayout.toolbarW - 32;
     let toolBtnW = (innerW - gap * 2) / 3;
     let actionBtnW = (innerW - gap * 3) / 4;
 
-    colorPicker.position(x, y + 18);
+    colorPicker.position(x, y + 22);
     colorPicker.size(48, 28);
-    sizeSlider.position(x + 70, y + 23);
+    sizeSlider.position(x + 70, y + 27);
     sizeSlider.size(max(112, innerW - 86));
 
-    brushBtn.position(x, y + 38);
-    bucketBtn.position(x + (toolBtnW + gap), y + 38);
-    eraserBtn.position(x + (toolBtnW + gap) * 2, y + 38);
+    brushBtn.position(x, y + 56);
+    bucketBtn.position(x + (toolBtnW + gap), y + 56);
+    eraserBtn.position(x + (toolBtnW + gap) * 2, y + 56);
 
-    clearBtn.position(x, y + 78);
-    submitBtn.position(x + (actionBtnW + gap), y + 78);
-    nextPromptBtn.position(x + (actionBtnW + gap) * 2, y + 78);
-    archiveBtn.position(x + (actionBtnW + gap) * 3, y + 78);
+    clearBtn.position(x, y + 96);
+    submitBtn.position(x + (actionBtnW + gap), y + 96);
+    nextPromptBtn.position(x + (actionBtnW + gap) * 2, y + 96);
+    archiveBtn.position(x + (actionBtnW + gap) * 3, y + 96);
+
+    undoBtn.position(drawLayout.drawX + drawLayout.drawW - 64, drawLayout.drawY + 12);
 
     backBtn.position(22, 92);
     gridBtn.position(88, 92);
@@ -303,6 +309,7 @@ function layoutInterface() {
     submitBtn.position(actionX + (btnW + gap), y);
     nextPromptBtn.position(actionX + (btnW + gap) * 2, y);
     archiveBtn.position(actionX + (btnW + gap) * 3, y);
+    undoBtn.position(drawLayout.drawX + drawLayout.drawW - 78, drawLayout.drawY + 16);
 
     backBtn.position(50, 96);
     gridBtn.position(118, 96);
@@ -314,6 +321,7 @@ function layoutInterface() {
   sizeDrawingButton(brushBtn);
   sizeDrawingButton(bucketBtn);
   sizeDrawingButton(eraserBtn);
+  sizeUndoButton(undoBtn);
   sizeDrawingButton(clearBtn);
   sizeDrawingButton(submitBtn);
   sizeDrawingButton(nextPromptBtn);
@@ -327,6 +335,7 @@ function layoutInterface() {
     brushBtn.size(toolBtnW, 34);
     bucketBtn.size(toolBtnW, 34);
     eraserBtn.size(toolBtnW, 34);
+    undoBtn.size(56, 32);
     clearBtn.size(actionBtnW, 34);
     submitBtn.size(actionBtnW, 34);
     nextPromptBtn.size(actionBtnW, 34);
@@ -387,6 +396,19 @@ function sizeArchiveButton(btn) {
   btn.style("color", "#4d4943");
 }
 
+function sizeUndoButton(btn) {
+  let mobile = isMobileScreen();
+  btn.size(mobile ? 56 : 64, mobile ? 32 : 36);
+  btn.style("height", mobile ? "32px" : "36px");
+  btn.style("min-width", "0");
+  btn.style("padding", mobile ? "2px 4px" : "4px 8px");
+  btn.style("font-size", mobile ? "10px" : "12px");
+  btn.style("line-height", "1.05");
+  btn.style("border", "1px solid rgba(43, 41, 38, 0.45)");
+  btn.style("background", "rgba(251, 250, 246, 0.72)");
+  btn.style("color", "#2b2926");
+}
+
 function updateToolButtonStyles() {
   if (!brushBtn || !bucketBtn || !eraserBtn) return;
 
@@ -411,6 +433,7 @@ function updateButtonVisibility() {
     brushBtn.show();
     bucketBtn.show();
     eraserBtn.show();
+    undoBtn.show();
 
     clearBtn.show();
     submitBtn.show();
@@ -430,6 +453,7 @@ function updateButtonVisibility() {
     brushBtn.hide();
     bucketBtn.hide();
     eraserBtn.hide();
+    undoBtn.hide();
 
     clearBtn.hide();
     submitBtn.hide();
@@ -883,11 +907,13 @@ function pointInsideDrawingArea(x, y) {
 
 function drawActionLineOnLayer(action, p1, p2) {
   if (action.tool === "eraser") {
-    drawingLayer.stroke(paperCol);
+    drawingLayer.erase();
+    drawingLayer.stroke(0);
     drawingLayer.strokeWeight(action.size * 2.2);
     drawingLayer.strokeCap(ROUND);
     drawingLayer.strokeJoin(ROUND);
     drawingLayer.line(p1.x, p1.y, p2.x, p2.y);
+    drawingLayer.noErase();
   } else {
     drawingLayer.stroke(action.color);
     drawingLayer.strokeWeight(action.size);
@@ -899,9 +925,11 @@ function drawActionLineOnLayer(action, p1, p2) {
 
 function drawDotOnLayer(action, p) {
   if (action.tool === "eraser") {
+    drawingLayer.erase();
     drawingLayer.noStroke();
-    drawingLayer.fill(paperCol);
+    drawingLayer.fill(0);
     drawingLayer.circle(p.x, p.y, action.size * 2.2);
+    drawingLayer.noErase();
   } else {
     drawingLayer.noStroke();
     drawingLayer.fill(action.color);
@@ -1092,6 +1120,43 @@ function clearDrawing() {
   startTime = millis();
 }
 
+function undoLastAction() {
+  if (page !== "draw" || actions.length === 0) return;
+
+  actions.pop();
+  currentAction = null;
+  redrawDrawingLayerFromActions();
+}
+
+function redrawDrawingLayerFromActions() {
+  drawingLayer.clear();
+
+  for (let action of actions) {
+    if (action.type === "stroke") {
+      let pts = action.points || [];
+
+      if (pts.length === 1) {
+        drawDotOnLayer(action, pts[0]);
+      }
+
+      for (let i = 1; i < pts.length; i++) {
+        drawActionLineOnLayer(action, pts[i - 1], pts[i]);
+      }
+    } else if (action.type === "fill") {
+      floodFillOnGraphics(
+        drawingLayer,
+        floor(action.x),
+        floor(action.y),
+        action.color,
+        0,
+        headerH,
+        width - 1,
+        height - 1
+      );
+    }
+  }
+}
+
 function nextPrompt() {
   if (actions.length > 0) {
     saveCurrentDrawing();
@@ -1238,21 +1303,37 @@ function generateArchiveWallLayout() {
   let header = archiveHeaderHeight();
   let marginX = isMobileScreen() ? 34 : 82;
   let availableW = width - marginX * 2;
-  let cols = max(1, floor(availableW / (isMobileScreen() ? 145 : 190)));
-  cols = min(cols, max(1, archive.length));
-  let spacingX = cols <= 1 ? 0 : availableW / (cols - 1);
+  let itemsPerRow = max(1, floor(availableW / (isMobileScreen() ? 140 : 188)));
+  itemsPerRow = min(itemsPerRow, max(1, archive.length));
   let spacingY = isMobileScreen() ? 138 : 172;
   let startY = header + (isMobileScreen() ? 54 : 68);
+  let rowCenters = [];
 
   for (let i = 0; i < archive.length; i++) {
-    let col = i % cols;
-    let row = floor(i / cols);
-    let centerOffset = cols === 1 ? availableW / 2 : col * spacingX;
-    let waveX = sin(i * 1.7) * (isMobileScreen() ? 5 : 10);
-    let waveY = cos(i * 1.1) * (isMobileScreen() ? 5 : 9);
+    let row = floor(i / itemsPerRow);
+    if (!rowCenters[row]) rowCenters[row] = [];
 
     let miniW = isMobileScreen() ? 118 : 150;
     let miniH = isMobileScreen() ? 96 : 120;
+    let minCenterX = marginX + miniW * 0.48;
+    let maxCenterX = width - marginX - miniW * 0.48;
+    let centerX = random(minCenterX, maxCenterX);
+    let minDist = miniW * (isMobileScreen() ? 0.78 : 0.86);
+
+    for (let attempt = 0; attempt < 14; attempt++) {
+      let tooClose = false;
+      for (let placedX of rowCenters[row]) {
+        if (abs(centerX - placedX) < minDist) {
+          tooClose = true;
+          break;
+        }
+      }
+      if (!tooClose) break;
+      centerX = random(minCenterX, maxCenterX);
+    }
+    rowCenters[row].push(centerX);
+
+    let jitterY = random(isMobileScreen() ? -12 : -18, isMobileScreen() ? 12 : 18);
 
     let miniLayer = createGraphics(miniW, miniH);
     miniLayer.pixelDensity(pd);
@@ -1260,8 +1341,8 @@ function generateArchiveWallLayout() {
     miniLayer.smooth();
 
     archiveWallLayout.push({
-      x: marginX + centerOffset - miniW / 2 + waveX,
-      y: startY + row * spacingY + waveY,
+      x: centerX - miniW / 2,
+      y: startY + row * spacingY + jitterY,
       scale: 0.88 + ((i % 5) * 0.025),
       alpha: 0.82 + ((i % 4) * 0.04),
       replayIndex: 0,
@@ -1279,9 +1360,9 @@ function getArchiveWallContentHeight() {
 
   let marginX = isMobileScreen() ? 34 : 82;
   let availableW = width - marginX * 2;
-  let cols = max(1, floor(availableW / (isMobileScreen() ? 145 : 190)));
-  cols = min(cols, max(1, archive.length));
-  let rows = ceil(archive.length / cols);
+  let itemsPerRow = max(1, floor(availableW / (isMobileScreen() ? 140 : 188)));
+  itemsPerRow = min(itemsPerRow, max(1, archive.length));
+  let rows = ceil(archive.length / itemsPerRow);
   let spacingY = isMobileScreen() ? 138 : 172;
   let startY = isMobileScreen() ? 54 : 68;
   let miniH = isMobileScreen() ? 96 : 120;
