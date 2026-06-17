@@ -731,6 +731,10 @@ function touchStarted() {
     let x = touches[0].x;
     let y = touches[0].y;
 
+    if (page === "draw" && pointInsideUndoButton(x, y)) {
+      return true;
+    }
+
     if (page === "draw" && pointInsideDrawingArea(x, y)) {
       handlePointerPressed(x, y);
       return false;
@@ -750,6 +754,10 @@ function touchMoved() {
     let x = touches[0].x;
     let y = touches[0].y;
 
+    if (page === "draw" && pointInsideUndoButton(x, y)) {
+      return true;
+    }
+
     if (isArchivePanning || (page === "draw" && pointInsideDrawingArea(x, y))) {
       handlePointerDragged(x, y);
       return false;
@@ -765,6 +773,10 @@ function touchEnded() {
 }
 
 function handlePointerPressed(x, y) {
+  if (page === "draw" && pointInsideUndoButton(x, y)) {
+    return;
+  }
+
   if (page === "draw" && pointInsideDrawingArea(x, y)) {
     if (currentTool === "bucket") {
       bucketFillAt(x, y);
@@ -790,6 +802,10 @@ function handlePointerPressed(x, y) {
 }
 
 function handlePointerDragged(x, y) {
+  if (page === "draw" && pointInsideUndoButton(x, y)) {
+    return false;
+  }
+
   if (isArchivePanning && archiveCanPanAt(x, y)) {
     let dx = x - lastPanPoint.x;
     let dy = y - lastPanPoint.y;
@@ -903,6 +919,17 @@ function pointInsideDrawingArea(x, y) {
     y >= drawLayout.drawY &&
     y <= drawLayout.drawY + drawLayout.drawH
   );
+}
+
+function pointInsideUndoButton(x, y) {
+  if (!undoBtn) return false;
+
+  let bx = undoBtn.x || 0;
+  let by = undoBtn.y || 0;
+  let bw = undoBtn.width || (isMobileScreen() ? 56 : 64);
+  let bh = undoBtn.height || (isMobileScreen() ? 32 : 36);
+
+  return x >= bx && x <= bx + bw && y >= by && y <= by + bh;
 }
 
 function drawActionLineOnLayer(action, p1, p2) {
