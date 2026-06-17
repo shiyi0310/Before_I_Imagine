@@ -1265,7 +1265,7 @@ function generateArchiveWallLayout() {
       scale: 0.88 + ((i % 5) * 0.025),
       alpha: 0.82 + ((i % 4) * 0.04),
       replayIndex: 0,
-      replaySpeed: 0.38 + ((i % 4) * 0.08),
+      replaySpeed: 0.62 + ((i % 4) * 0.1),
       miniW: miniW,
       miniH: miniH,
       miniLayer: miniLayer,
@@ -1292,26 +1292,37 @@ function getArchiveWallContentHeight() {
 function generateLayerLayout() {
   layerLayout = [];
 
-  let marginX = isMobileScreen() ? 46 : 90;
-  let cellW = isMobileScreen() ? 155 : 230;
-  let cellH = isMobileScreen() ? 142 : 182;
-  let usableW = max(cellW, width - marginX * 2);
-  let cols = max(1, floor(usableW / cellW));
-  let startX = (width - (cols - 1) * cellW) / 2;
+  let marginX = isMobileScreen() ? 38 : 86;
+  let availableW = max(160, width - marginX * 2);
+  let slotsPerRow = max(2, floor(availableW / (isMobileScreen() ? 96 : 150)));
+  slotsPerRow = min(slotsPerRow, max(1, archive.length));
+  let slotW = availableW / slotsPerRow;
+  let cellH = isMobileScreen() ? 148 : 184;
   let startY = archiveHeaderHeight() + 76;
-  let baseScale = isMobileScreen() ? 0.74 : 0.86;
+  let baseScale = isMobileScreen() ? 0.7 : 0.84;
+  let rows = ceil(archive.length / slotsPerRow);
+  let slotOrders = [];
+
+  for (let row = 0; row < rows; row++) {
+    let order = [];
+    for (let slot = 0; slot < slotsPerRow; slot++) {
+      order.push(slot);
+    }
+    slotOrders.push(shuffle(order, false));
+  }
 
   for (let i = 0; i < archive.length; i++) {
-    let col = i % cols;
-    let row = floor(i / cols);
-    let jitterX = random(isMobileScreen() ? -18 : -28, isMobileScreen() ? 18 : 28);
-    let jitterY = random(isMobileScreen() ? -16 : -24, isMobileScreen() ? 16 : 24);
+    let row = floor(i / slotsPerRow);
+    let slotIndex = i % slotsPerRow;
+    let slot = slotOrders[row][slotIndex];
+    let jitterX = random(-slotW * 0.28, slotW * 0.28);
+    let jitterY = random(isMobileScreen() ? -26 : -34, isMobileScreen() ? 26 : 34);
 
     layerLayout.push({
-      x: startX + col * cellW + jitterX,
+      x: marginX + slotW * (slot + 0.5) + jitterX,
       y: startY + row * cellH + jitterY,
-      scale: random(baseScale - 0.08, baseScale + 0.1),
-      rotation: random(-0.075, 0.075),
+      scale: random(baseScale - 0.06, baseScale + 0.1),
+      rotation: random(-0.08, 0.08),
       alpha: random(0.48, 0.72)
     });
   }
@@ -1320,12 +1331,12 @@ function generateLayerLayout() {
 function getLayerContentHeight() {
   if (archive.length === 0) return height - archiveHeaderHeight() - 58;
 
-  let marginX = isMobileScreen() ? 46 : 90;
-  let cellW = isMobileScreen() ? 155 : 230;
-  let cellH = isMobileScreen() ? 142 : 182;
-  let usableW = max(cellW, width - marginX * 2);
-  let cols = max(1, floor(usableW / cellW));
-  let rows = ceil(archive.length / cols);
+  let marginX = isMobileScreen() ? 38 : 86;
+  let availableW = max(160, width - marginX * 2);
+  let slotsPerRow = max(2, floor(availableW / (isMobileScreen() ? 96 : 150)));
+  slotsPerRow = min(slotsPerRow, max(1, archive.length));
+  let cellH = isMobileScreen() ? 148 : 184;
+  let rows = ceil(archive.length / slotsPerRow);
   let startY = 76;
 
   return startY + max(0, rows - 1) * cellH + 190;
