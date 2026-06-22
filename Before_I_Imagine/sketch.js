@@ -5,7 +5,7 @@
 // High-resolution version
 
 let page = "draw";
-// pages: "draw", "archiveWall", "archiveGrid", "layer"
+// pages: "draw", "archiveWall", "archiveGrid", "layer", "stack"
 
 let prompts = [
   {
@@ -82,6 +82,7 @@ let backBtn;
 let gridBtn;
 let wallBtn;
 let layerBtn;
+let stackBtn;
 let exportBtn;
 let clearArchiveBtn;
 
@@ -108,6 +109,11 @@ let archiveWallLayout = [];
 let layerLayout = [];
 let layerReplayIndex = 0;
 let maxLayerUnits = 0;
+let stackBuffer = null;
+let stackPromptIndex = 0;
+let stackCountMode = 30;
+let stackDirty = true;
+let stackRenderedCount = 0;
 let gridMiniCache = {};
 let archivePan = { x: 0, y: 0 };
 let isArchivePanning = false;
@@ -162,6 +168,8 @@ function draw() {
     drawArchiveGridPage();
   } else if (page === "layer") {
     drawLayerPage();
+  } else if (page === "stack") {
+    drawStackPage();
   }
 
   updateButtonVisibility();
@@ -237,6 +245,13 @@ function createInterface() {
     resetArchivePan();
   });
 
+  stackBtn = createButton("Stack");
+  stackBtn.mousePressed(() => {
+    page = "stack";
+    resetArchivePan();
+    markStackDirty();
+  });
+
   exportBtn = createButton("Export");
   exportBtn.mousePressed(exportArchiveJSON);
 
@@ -246,7 +261,7 @@ function createInterface() {
   let allBtns = [
   brushBtn, bucketBtn, eraserBtn, undoBtn,
   clearBtn, submitBtn, nextPromptBtn, archiveBtn,
-  backBtn, gridBtn, wallBtn, layerBtn, exportBtn
+  backBtn, gridBtn, wallBtn, layerBtn, stackBtn, exportBtn
   ];
 
   for (let b of allBtns) {
@@ -282,11 +297,15 @@ function layoutInterface() {
 
     undoBtn.position(drawLayout.drawX + drawLayout.drawW - 64, drawLayout.drawY + 12);
 
-    backBtn.position(22, 92);
-    gridBtn.position(88, 92);
-    wallBtn.position(146, 92);
-    layerBtn.position(206, 92);
-    exportBtn.position(268, 92);
+    let archiveNavX = 14;
+    let archiveNavGap = 4;
+    let archiveNavW = max(44, floor((width - archiveNavX * 2 - archiveNavGap * 5) / 6));
+    backBtn.position(archiveNavX, 92);
+    gridBtn.position(archiveNavX + (archiveNavW + archiveNavGap), 92);
+    wallBtn.position(archiveNavX + (archiveNavW + archiveNavGap) * 2, 92);
+    layerBtn.position(archiveNavX + (archiveNavW + archiveNavGap) * 3, 92);
+    stackBtn.position(archiveNavX + (archiveNavW + archiveNavGap) * 4, 92);
+    exportBtn.position(archiveNavX + (archiveNavW + archiveNavGap) * 5, 92);
 
   } else {
     let y = drawLayout.toolbarY + 32;
@@ -315,7 +334,8 @@ function layoutInterface() {
     gridBtn.position(118, 96);
     wallBtn.position(176, 96);
     layerBtn.position(238, 96);
-    exportBtn.position(304, 96);
+    stackBtn.position(304, 96);
+    exportBtn.position(370, 96);
   }
 
   sizeDrawingButton(brushBtn);
@@ -345,7 +365,17 @@ function layoutInterface() {
   sizeArchiveButton(gridBtn);
   sizeArchiveButton(wallBtn);
   sizeArchiveButton(layerBtn);
+  sizeArchiveButton(stackBtn);
   sizeArchiveButton(exportBtn);
+  if (mobile) {
+    let archiveNavW = max(44, floor((width - 28 - 20) / 6));
+    backBtn.size(archiveNavW, 28);
+    gridBtn.size(archiveNavW, 28);
+    wallBtn.size(archiveNavW, 28);
+    layerBtn.size(archiveNavW, 28);
+    stackBtn.size(archiveNavW, 28);
+    exportBtn.size(archiveNavW, 28);
+  }
 }
 
 function styleButton(btn) {
@@ -444,6 +474,7 @@ function updateButtonVisibility() {
     gridBtn.hide();
     wallBtn.hide();
     layerBtn.hide();
+    stackBtn.hide();
     exportBtn.hide();
     //clearArchiveBtn.hide();
   } else {
@@ -464,6 +495,7 @@ function updateButtonVisibility() {
     gridBtn.show();
     wallBtn.show();
     layerBtn.show();
+    stackBtn.show();
     exportBtn.show();
     //clearArchiveBtn.show();
   }
@@ -731,6 +763,10 @@ function touchStarted() {
     let x = touches[0].x;
     let y = touches[0].y;
 
+    if (page === "stack" && handleStackControlPress(x, y)) {
+      return false;
+    }
+
     if (page === "draw" && pointInsideUndoButton(x, y)) {
       return true;
     }
@@ -773,6 +809,10 @@ function touchEnded() {
 }
 
 function handlePointerPressed(x, y) {
+  if (page === "stack" && handleStackControlPress(x, y)) {
+    return;
+  }
+
   if (page === "draw" && pointInsideUndoButton(x, y)) {
     return;
   }
@@ -1268,6 +1308,7 @@ function refreshArchiveViews() {
   generateArchiveWallLayout();
   calculateMaxLayerUnits();
   generateLayerLayout();
+  markStackDirty();
 }
 
 function normalizeDrawingData(d) {
@@ -1684,6 +1725,303 @@ function drawLayerPage() {
   }
 
   drawArchiveFooter("Layer view lets individual traces overlap without flattening them into one image.");
+}
+
+// -------------------------
+// COLLECTIVE STACK VIEW
+// -------------------------
+
+function markStackDirty() {
+  stackDirty = true;
+}
+
+function getStackControlLayout() {
+  let outerMargin = isMobileScreen() ? 18 : 50;
+  let gap = isMobileScreen() ? 5 : 8;
+  let categoryY = archiveHeaderHeight() + 18;
+  let categoryH = isMobileScreen() ? 28 : 30;
+  let availableW = min(width - outerMargin * 2, isMobileScreen() ? width : 760);
+  let margin = (width - availableW) / 2;
+  let categoryW = (availableW - gap * (prompts.length - 1)) / prompts.length;
+  let countY = categoryY + categoryH + (isMobileScreen() ? 10 : 12);
+  let countW = isMobileScreen() ? 52 : 62;
+  let countH = 26;
+
+  let categories = [];
+  for (let i = 0; i < prompts.length; i++) {
+    categories.push({
+      x: margin + i * (categoryW + gap),
+      y: categoryY,
+      w: categoryW,
+      h: categoryH,
+      value: i
+    });
+  }
+
+  let counts = [];
+  let countValues = [10, 30, "all"];
+  for (let i = 0; i < countValues.length; i++) {
+    counts.push({
+      x: margin + i * (countW + gap),
+      y: countY,
+      w: countW,
+      h: countH,
+      value: countValues[i]
+    });
+  }
+
+  return {
+    margin: margin,
+    categories: categories,
+    counts: counts,
+    stackY: countY + countH + (isMobileScreen() ? 14 : 18)
+  };
+}
+
+function handleStackControlPress(x, y) {
+  if (page !== "stack") return false;
+
+  let controls = getStackControlLayout();
+
+  for (let item of controls.categories) {
+    if (pointInsideRect(x, y, item)) {
+      if (stackPromptIndex !== item.value) {
+        stackPromptIndex = item.value;
+        markStackDirty();
+      }
+      return true;
+    }
+  }
+
+  for (let item of controls.counts) {
+    if (pointInsideRect(x, y, item)) {
+      if (stackCountMode !== item.value) {
+        stackCountMode = item.value;
+        markStackDirty();
+      }
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function pointInsideRect(x, y, rectData) {
+  return (
+    x >= rectData.x &&
+    x <= rectData.x + rectData.w &&
+    y >= rectData.y &&
+    y <= rectData.y + rectData.h
+  );
+}
+
+function drawStackPage() {
+  drawArchiveHeader(
+    "Archive of Remembered Apples",
+    "Collective Stack compares one sensory task at a time."
+  );
+
+  drawStackControls();
+
+  let frame = getStackFrame();
+  if (
+    stackDirty ||
+    !stackBuffer ||
+    stackBuffer.width !== floor(frame.w) ||
+    stackBuffer.height !== floor(frame.h)
+  ) {
+    generateStackBuffer(frame.w, frame.h);
+  }
+
+  noStroke();
+  fill(paperCol);
+  rect(frame.x, frame.y, frame.w, frame.h, 4);
+  stroke(205, 197, 186);
+  strokeWeight(1);
+  noFill();
+  rect(frame.x, frame.y, frame.w, frame.h, 4);
+
+  if (stackRenderedCount > 0 && stackBuffer) {
+    image(stackBuffer, frame.x, frame.y, frame.w, frame.h);
+  } else {
+    noStroke();
+    fill(124);
+    textAlign(CENTER);
+    textSize(isMobileScreen() ? 12 : 14);
+    text("No drawings saved for this task.", width / 2, frame.y + frame.h / 2);
+  }
+
+  let selectedTitle = getArchiveTaskTitle(stackPromptIndex).split(" — ")[0];
+  drawArchiveFooter(
+    `${stackRenderedCount} drawings overlaid / ${selectedTitle}`
+  );
+}
+
+function drawStackControls() {
+  let controls = getStackControlLayout();
+  let categoryLabels = ["DEFAULT", "TOUCH", "TASTE", "IMPERFECT"];
+
+  for (let item of controls.categories) {
+    let active = stackPromptIndex === item.value;
+    stroke(active ? 45 : 160);
+    strokeWeight(1);
+    fill(active ? 45 : color(bgCol));
+    rect(item.x, item.y, item.w, item.h, 2);
+
+    noStroke();
+    fill(active ? 250 : 82);
+    textAlign(CENTER, CENTER);
+    textSize(isMobileScreen() ? 9 : 11);
+    text(categoryLabels[item.value], item.x + item.w / 2, item.y + item.h / 2 + 1);
+  }
+
+  noStroke();
+  fill(112);
+  textAlign(RIGHT, CENTER);
+  textSize(10);
+  let labelX = width - controls.margin;
+  let countY = controls.counts[0].y + controls.counts[0].h / 2;
+  text("RECENT", labelX, countY);
+
+  for (let item of controls.counts) {
+    let active = stackCountMode === item.value;
+    stroke(active ? 55 : 174);
+    strokeWeight(1);
+    fill(active ? 55 : color(bgCol));
+    rect(item.x, item.y, item.w, item.h, 2);
+
+    noStroke();
+    fill(active ? 250 : 92);
+    textAlign(CENTER, CENTER);
+    textSize(10);
+    text(item.value === "all" ? "ALL" : String(item.value), item.x + item.w / 2, item.y + item.h / 2 + 1);
+  }
+}
+
+function getStackFrame() {
+  let controls = getStackControlLayout();
+  let marginX = isMobileScreen() ? 18 : max(70, width * 0.12);
+  let bottom = height - 72;
+
+  return {
+    x: marginX,
+    y: controls.stackY,
+    w: max(120, width - marginX * 2),
+    h: max(90, bottom - controls.stackY)
+  };
+}
+
+function generateStackBuffer(bufferW, bufferH) {
+  let w = max(1, floor(bufferW));
+  let h = max(1, floor(bufferH));
+
+  if (stackBuffer) {
+    stackBuffer.remove();
+  }
+  stackBuffer = createGraphics(w, h);
+  stackBuffer.pixelDensity(pd);
+  stackBuffer.clear();
+  stackBuffer.smooth();
+
+  let matching = archive
+    .filter(d => Number(d.promptIndex) === stackPromptIndex)
+    .slice()
+    .sort((a, b) => {
+      let aTime = a.createdAt ? new Date(a.createdAt).getTime() : Number(a.id) || 0;
+      let bTime = b.createdAt ? new Date(b.createdAt).getTime() : Number(b.id) || 0;
+      return bTime - aTime;
+    });
+
+  // "All" is capped to protect mobile performance. Raise this value if needed.
+  let limit = stackCountMode === "all" ? 100 : stackCountMode;
+  let selected = matching.slice(0, limit);
+  stackRenderedCount = selected.length;
+
+  if (selected.length === 0) {
+    stackDirty = false;
+    return;
+  }
+
+  let drawingBuffer = createGraphics(w, h);
+  drawingBuffer.pixelDensity(pd);
+  drawingBuffer.smooth();
+
+  let opacity = constrain(map(selected.length, 1, 100, 0.15, 0.08), 0.08, 0.15);
+
+  for (let drawing of selected) {
+    drawingBuffer.clear();
+    renderNormalizedDrawingForStack(drawingBuffer, drawing);
+
+    stackBuffer.push();
+    stackBuffer.tint(255, floor(opacity * 255));
+    stackBuffer.image(drawingBuffer, 0, 0);
+    stackBuffer.noTint();
+    stackBuffer.pop();
+  }
+
+  drawingBuffer.remove();
+  stackDirty = false;
+}
+
+function renderNormalizedDrawingForStack(g, drawing) {
+  // Stored action geometry represents the non-transparent drawn content, so it
+  // provides the same useful crop bounds without scanning every source pixel.
+  let bounds = getDrawingBounds(drawing);
+  let contentW = max(1, bounds.maxX - bounds.minX);
+  let contentH = max(1, bounds.maxY - bounds.minY);
+  let targetW = g.width * (isMobileScreen() ? 0.82 : 0.76);
+  let targetH = g.height * 0.78;
+  let scaleFactor = min(targetW / contentW, targetH / contentH);
+  let offsetX = (g.width - contentW * scaleFactor) / 2;
+  let offsetY = (g.height - contentH * scaleFactor) / 2;
+  let acts = drawing.actions || [];
+
+  for (let action of acts) {
+    if (action.type === "stroke") {
+      let pts = action.points || [];
+
+      if (action.tool === "eraser") {
+        g.erase();
+        g.stroke(0);
+      } else {
+        g.noErase();
+        g.stroke(action.color || "#111111");
+      }
+
+      g.strokeWeight(max(0.8, action.size * scaleFactor));
+      g.strokeCap(ROUND);
+      g.strokeJoin(ROUND);
+
+      if (pts.length === 1) {
+        let p = mapPointToStack(pts[0], bounds, scaleFactor, offsetX, offsetY);
+        g.noStroke();
+        g.fill(action.tool === "eraser" ? 0 : action.color || "#111111");
+        g.circle(p.x, p.y, max(1, action.size * scaleFactor));
+      }
+
+      for (let i = 1; i < pts.length; i++) {
+        let p1 = mapPointToStack(pts[i - 1], bounds, scaleFactor, offsetX, offsetY);
+        let p2 = mapPointToStack(pts[i], bounds, scaleFactor, offsetX, offsetY);
+        g.line(p1.x, p1.y, p2.x, p2.y);
+      }
+
+      g.noErase();
+    } else if (action.type === "fill") {
+      // Fill actions store a point but not their original contour. Keep them as
+      // a quiet mark so a large flood fill cannot flatten the collective trace.
+      let p = mapPointToStack(action, bounds, scaleFactor, offsetX, offsetY);
+      g.noStroke();
+      g.fill(action.color || "#111111");
+      g.circle(p.x, p.y, constrain(24 * scaleFactor, 10, 48));
+    }
+  }
+}
+
+function mapPointToStack(p, bounds, scaleFactor, offsetX, offsetY) {
+  return {
+    x: (p.x - bounds.minX) * scaleFactor + offsetX,
+    y: (p.y - bounds.minY) * scaleFactor + offsetY
+  };
 }
 
 // -------------------------
@@ -2300,4 +2638,5 @@ function windowResized() {
   generateArchiveWallLayout();
   calculateMaxLayerUnits();
   generateLayerLayout();
+  markStackDirty();
 }
