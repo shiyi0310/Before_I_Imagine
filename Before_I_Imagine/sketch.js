@@ -249,6 +249,7 @@ function createInterface() {
   stackBtn.mousePressed(() => {
     page = "stack";
     resetArchivePan();
+    selectFirstAvailableStackPrompt();
     markStackDirty();
   });
 
@@ -1308,10 +1309,21 @@ function refreshArchiveViews() {
   generateArchiveWallLayout();
   calculateMaxLayerUnits();
   generateLayerLayout();
+  if (page === "stack") selectFirstAvailableStackPrompt();
   markStackDirty();
 }
 
 function normalizeDrawingData(d) {
+  if (typeof d === "string") {
+    try {
+      d = JSON.parse(d);
+    } catch (error) {
+      return null;
+    }
+  }
+
+  if (!d || typeof d !== "object") return null;
+
   if (!d.actions && d.strokes) {
     d.actions = [];
 
@@ -1342,8 +1354,39 @@ function normalizeDrawingData(d) {
   if (!d.headerHeight) d.headerHeight = headerH;
   if (!d.canvasWidth) d.canvasWidth = width;
   if (!d.canvasHeight) d.canvasHeight = height;
+  if (d.promptIndex === null || d.promptIndex === "" || !Number.isFinite(Number(d.promptIndex))) {
+    let inferredPromptIndex = inferDrawingPromptIndex(d);
+    if (inferredPromptIndex !== null) d.promptIndex = inferredPromptIndex;
+  }
 
   return d;
+}
+
+function inferDrawingPromptIndex(d) {
+  let text = [
+    d.promptEN,
+    d.promptCN,
+    d.prompt,
+    d.task,
+    d.category
+  ].filter(Boolean).join(" ").toLowerCase();
+
+  for (let i = 0; i < prompts.length; i++) {
+    if (
+      text.includes(prompts[i].en.toLowerCase()) ||
+      text.includes(prompts[i].cn) ||
+      text.includes(prompts[i].task.toLowerCase())
+    ) {
+      return i;
+    }
+  }
+
+  if (text.includes("touch") || text.includes("hand")) return 1;
+  if (text.includes("taste") || text.includes("mouth")) return 2;
+  if (text.includes("imperfect") || text.includes("not perfect")) return 3;
+  if (text.includes("default") || text.includes("first apple")) return 0;
+
+  return null;
 }
 
 function clearArchive() {
@@ -1735,6 +1778,37 @@ function markStackDirty() {
   stackDirty = true;
 }
 
+function getDrawingPromptIndex(drawing) {
+  let rawIndex = drawing && drawing.promptIndex;
+  if (rawIndex !== null && rawIndex !== "") {
+    let directIndex = Number(rawIndex);
+    if (Number.isFinite(directIndex) && directIndex >= 0 && directIndex < prompts.length) {
+      return directIndex;
+    }
+  }
+
+  return inferDrawingPromptIndex(drawing || {});
+}
+
+function getStackCategoryCounts() {
+  let counts = new Array(prompts.length).fill(0);
+
+  for (let drawing of archive) {
+    let index = getDrawingPromptIndex(drawing);
+    if (index !== null) counts[index]++;
+  }
+
+  return counts;
+}
+
+function selectFirstAvailableStackPrompt() {
+  let counts = getStackCategoryCounts();
+  if (counts[stackPromptIndex] > 0) return;
+
+  let firstAvailable = counts.findIndex(count => count > 0);
+  if (firstAvailable >= 0) stackPromptIndex = firstAvailable;
+}
+
 function getStackControlLayout() {
   let outerMargin = isMobileScreen() ? 18 : 50;
   let gap = isMobileScreen() ? 5 : 8;
@@ -1860,6 +1934,7 @@ function drawStackPage() {
 function drawStackControls() {
   let controls = getStackControlLayout();
   let categoryLabels = ["DEFAULT", "TOUCH", "TASTE", "IMPERFECT"];
+  let categoryCounts = getStackCategoryCounts();
 
   for (let item of controls.categories) {
     let active = stackPromptIndex === item.value;
@@ -1872,7 +1947,11 @@ function drawStackControls() {
     fill(active ? 250 : 82);
     textAlign(CENTER, CENTER);
     textSize(isMobileScreen() ? 9 : 11);
-    text(categoryLabels[item.value], item.x + item.w / 2, item.y + item.h / 2 + 1);
+    text(
+      `${categoryLabels[item.value]} ${categoryCounts[item.value]}`,
+      item.x + item.w / 2,
+      item.y + item.h / 2 + 1
+    );
   }
 
   noStroke();
@@ -1924,7 +2003,7 @@ function generateStackBuffer(bufferW, bufferH) {
   stackBuffer.smooth();
 
   let matching = archive
-    .filter(d => Number(d.promptIndex) === stackPromptIndex)
+    .filter(d => getDrawingPromptIndex(d) === stackPromptIndex)
     .slice()
     .sort((a, b) => {
       let aTime = a.createdAt ? new Date(a.createdAt).getTime() : Number(a.id) || 0;
@@ -1952,11 +2031,10 @@ function generateStackBuffer(bufferW, bufferH) {
     drawingBuffer.clear();
     renderNormalizedDrawingForStack(drawingBuffer, drawing);
 
-    stackBuffer.push();
-    stackBuffer.tint(255, floor(opacity * 255));
+    stackBuffer.drawingContext.save();
+    stackBuffer.drawingContext.globalAlpha = opacity;
     stackBuffer.image(drawingBuffer, 0, 0);
-    stackBuffer.noTint();
-    stackBuffer.pop();
+    stackBuffer.drawingContext.restore();
   }
 
   drawingBuffer.remove();
