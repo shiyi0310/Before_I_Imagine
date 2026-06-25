@@ -916,7 +916,7 @@ function generateDrawBackgroundApplesLayout() {
 
   let mobile = isMobileScreen();
   let sidebarW = mobile ? 0 : getDrawSidebarWidth();
-  let count = archive.length;
+  let count = min(archive.length, mobile ? 8 : 16);
   let recent = archive.slice(-count);
   let left = sidebarW + (mobile ? 18 : 34);
   let right = width - (mobile ? 18 : 34);
@@ -991,15 +991,18 @@ function drawFloatingArchiveApples() {
   for (let item of drawBackgroundApplesLayout) {
     let d = archive[item.archiveIndex];
     if (!d) continue;
+    if (!item.cachedThumb || item.cachedThumbSize !== floor(item.size)) {
+      item.cachedThumbSize = floor(item.size);
+      item.cachedThumb = getCachedStaticMini(d, item.cachedThumbSize, item.cachedThumbSize);
+    }
 
-    let t = millis() * item.speed + item.phase;
-    let floatX = sin(t * 0.8) * item.drift;
-    let floatY = cos(t) * item.drift;
-    let s = item.size;
+    let t = backgroundLayoutMode === "grid" ? item.phase : millis() * item.speed + item.phase;
+    let floatX = backgroundLayoutMode === "grid" ? 0 : sin(t * 0.8) * item.drift;
+    let floatY = backgroundLayoutMode === "grid" ? 0 : cos(t) * item.drift;
 
     push();
     translate(item.x + floatX, item.y + floatY);
-    rotate(item.rotation + sin(t * 1.4) * 0.025);
+    rotate(backgroundLayoutMode === "grid" ? 0 : item.rotation + sin(t * 1.4) * 0.025);
 
     if (backgroundViewMode === "slice") {
       drawFloatingSliceCard(d, item);
@@ -1024,40 +1027,42 @@ function drawFloatingArchiveApples() {
 }
 
 function drawFloatingWallCard(d, item) {
-  if (!item.cachedThumb) return;
-
   push();
   translate(-item.size / 2, -item.size / 2);
   tint(255, 255 * min(0.92, item.alpha + 0.12));
-  image(item.cachedThumb, 0, 0, item.size, item.size);
+
+  if (item.cachedThumb) {
+    image(item.cachedThumb, 0, 0, item.size, item.size);
+  } else {
+    drawStaticMini(d, item.size, item.size);
+  }
+
   noTint();
   pop();
 }
+
 
 function drawFloatingSliceCard(d, item) {
   let w = item.cardW;
   let h = item.cardH;
 
-  drawingContext.save();
-  drawingContext.shadowColor = "rgba(50, 42, 32, 0.13)";
-  drawingContext.shadowBlur = 18;
-  drawingContext.shadowOffsetY = 12;
   noStroke();
   fill(255, 253, 248, 86);
   rect(-w / 2, -h / 2, w, h, 8);
-  drawingContext.restore();
 
   stroke(255, 255, 255, 78);
   strokeWeight(1);
   noFill();
   rect(-w / 2 + 0.5, -h / 2 + 0.5, w - 1, h - 1, 8);
 
-  push();
-  translate(-item.size / 2, -item.size / 2);
-  tint(255, 255 * item.alpha);
-  drawStaticMini(d, item.size, item.size);
-  noTint();
-  pop();
+  if (item.cachedThumb) {
+    push();
+    translate(-item.size / 2, -item.size / 2);
+    tint(255, 255 * item.alpha);
+    image(item.cachedThumb, 0, 0, item.size, item.size);
+    noTint();
+    pop();
+  }
 }
 
 function drawSelectedApplePopup() {
@@ -1581,11 +1586,24 @@ function handleDrawPageClick(x, y) {
     return true;
   }
 
+  if (
+    !isClickOnViewSwitcher(x, y)
+  ) {
+    toggleBackgroundLayout();
+    return true;
+  }
+
   return false;
 }
 
+let lastBackgroundToggleTime = 0;
+
 function toggleBackgroundLayout() {
+  if (millis() - lastBackgroundToggleTime < 250) return;
+  lastBackgroundToggleTime = millis();
   backgroundLayoutMode = backgroundLayoutMode === "float" ? "grid" : "float";
+  selectedApple = null;
+  selectedAppleIndex = -1;
   generateDrawBackgroundApplesLayout();
 }
 
@@ -1637,9 +1655,9 @@ function getAppleCardAt(x, y) {
 
   for (let i = drawBackgroundApplesLayout.length - 1; i >= 0; i--) {
     let item = drawBackgroundApplesLayout[i];
-    let t = millis() * item.speed + item.phase;
-    let cx = item.x + sin(t * 0.8) * item.drift;
-    let cy = item.y + cos(t) * item.drift;
+    let t = backgroundLayoutMode === "grid" ? item.phase : millis() * item.speed + item.phase;
+    let cx = item.x + (backgroundLayoutMode === "grid" ? 0 : sin(t * 0.8) * item.drift);
+    let cy = item.y + (backgroundLayoutMode === "grid" ? 0 : cos(t) * item.drift);
     let hitW = item.cardW || item.size;
     let hitH = item.cardH || item.size;
 
