@@ -139,7 +139,7 @@ function setup() {
   document.body.style.fontFamily = interfaceFont;
   document.body.style.fontWeight = "400";
 
-  pd = isMobileScreen() ? 1 : min(displayDensity(), 2);
+  pd = min(displayDensity(), 2);
   pixelDensity(pd);
 
   createCanvas(windowWidth, windowHeight);
