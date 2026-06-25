@@ -473,19 +473,34 @@ function updateToolButtonStyles() {
 }
 
 function updateButtonVisibility() {
-  if (page === "draw" && modalOpen) {
-    colorPicker.show();
-    sizeSlider.show();
+  if (page === "draw") {
+    if (modalOpen) {
+      colorPicker.show();
+      sizeSlider.show();
 
-    brushBtn.show();
-    bucketBtn.show();
-    eraserBtn.show();
-    undoBtn.show();
+      brushBtn.show();
+      bucketBtn.show();
+      eraserBtn.show();
+      undoBtn.show();
 
-    clearBtn.show();
-    submitBtn.show();
-    nextPromptBtn.show();
-    archiveBtn.show();
+      clearBtn.show();
+      submitBtn.show();
+      nextPromptBtn.show();
+      archiveBtn.show();
+    } else {
+      colorPicker.hide();
+      sizeSlider.hide();
+
+      brushBtn.hide();
+      bucketBtn.hide();
+      eraserBtn.hide();
+      undoBtn.hide();
+
+      clearBtn.hide();
+      submitBtn.hide();
+      nextPromptBtn.hide();
+      archiveBtn.hide();
+    }
 
     backBtn.hide();
     gridBtn.hide();
@@ -794,23 +809,23 @@ function drawDrawPageSidebar() {
 
   fill(inkCol);
   textSize(11);
-  text("•  ARCHIVE WALL", 30, 150);
-  textSize(34);
-  text(String(archive.length), 30, 202);
+  text("•  ARCHIVE WALL", 30, 132);
+  textSize(28);
+  text(String(archive.length), 30, 176);
   fill(mutedCol);
-  textSize(12);
-  text("Apples collected", 30, 226);
+  textSize(11);
+  text("Apples collected", 30, 198);
 
-  drawSidebarSparkline(30, 266, w - 60, 26);
+  drawSidebarSparkline(30, 236, w - 60, 24);
 
   fill(mutedCol);
   textSize(11);
-  text("RECENT APPLES", 30, 344);
-  drawSidebarRecentApples(30, 374, w - 60);
+  text("RECENT APPLES", 30, 302);
+  drawSidebarRecentApples(30, 330, w - 60);
 
   stroke(226, 220, 210);
   strokeWeight(1);
-  let aboutY = max(528, min(height - 232, 560));
+  let aboutY = max(460, min(height - 226, 520));
   line(30, aboutY - 28, w - 30, aboutY - 28);
 
   noStroke();
@@ -861,27 +876,27 @@ function drawSidebarSparkline(x, y, w, h) {
 
 function drawSidebarRecentApples(x, y, w) {
   let recent = archive.slice(-5).reverse();
-  let rowH = 32;
-  let maxItems = height < 690 ? 3 : 5;
+  let rowH = 28;
+  let maxItems = height < 760 ? 3 : 5;
 
   for (let i = 0; i < maxItems; i++) {
     let rowY = y + i * rowH;
     if (recent[i]) {
       push();
-      translate(x, rowY - 12);
-      drawStaticMini(recent[i], 24, 24);
+      translate(x, rowY - 10);
+      drawStaticMini(recent[i], 20, 20);
       pop();
     } else {
       noFill();
       stroke(205, 199, 190);
-      circle(x + 12, rowY, 18);
+      circle(x + 10, rowY, 16);
     }
 
     noStroke();
     fill(146);
     textAlign(LEFT);
     textSize(10);
-    text(recent[i] ? formatRelativeArchiveTime(recent[i], i) : "waiting", x + 38, rowY + 4);
+    text(recent[i] ? formatRelativeArchiveTime(recent[i], i) : "waiting", x + 32, rowY + 4);
   }
 }
 
@@ -1037,23 +1052,22 @@ function drawFloatingWallCard(d, item) {
 }
 
 function drawFloatingSliceCard(d, item) {
-  let r = item.cardW * 0.47;
+  let w = item.cardW;
+  let h = item.cardH;
 
   drawingContext.save();
   drawingContext.shadowColor = "rgba(50, 42, 32, 0.13)";
   drawingContext.shadowBlur = 18;
   drawingContext.shadowOffsetY = 12;
   noStroke();
-  fill(255, 253, 248, 92);
-  circle(0, 0, r * 2);
+  fill(255, 253, 248, 86);
+  rect(-w / 2, -h / 2, w, h, 8);
   drawingContext.restore();
 
-  stroke(216, 56, 42, 150);
-  strokeWeight(1.2);
+  stroke(255, 255, 255, 78);
+  strokeWeight(1);
   noFill();
-  circle(0, 0, r * 2 - 2);
-  stroke(238, 214, 154, 120);
-  circle(0, 0, r * 1.48);
+  rect(-w / 2 + 0.5, -h / 2 + 0.5, w - 1, h - 1, 8);
 
   push();
   translate(-item.size / 2, -item.size / 2);
