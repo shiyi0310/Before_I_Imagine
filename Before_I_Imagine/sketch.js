@@ -548,7 +548,7 @@ function getDrawingLayout() {
     let pageW = width - margin * 2;
     let titleY = 34;
     let cardY = 88;
-    let cardH = 220;
+    let cardH = 250;
     let drawY = cardY + cardH + 22;
     let toolbarH = 142;
     let footerH = 34;
@@ -844,7 +844,7 @@ function drawDrawPageSidebar() {
   fill(70);
   textSize(11);
   textLeading(19);
-  text("Draw from memory.\nNot from images.\nNot from search.\nJust what comes first.", 30, aboutY + 32);
+  text("Draw from memory.\nNot from images.\nNot from search.\nJust what comes first.", 30, aboutY + 44);
 
   if (height > 690) {
     noFill();
@@ -1197,22 +1197,22 @@ function drawPromptCard(p) {
     fill(mutedCol);
     textAlign(LEFT);
     textSize(13);
-    text(p.task, x + 18, y + 26);
+    text(p.task, x + 18, y + 28);
 
     fill(inkCol);
     textSize(19);
     textLeading(23);
-    text(p.en, x + 18, y + 64, w - 44);
+    text(p.en, x + 18, y + 72, w - 44);
     fill(60);
     textSize(15);
     textLeading(20);
-    text(p.cn, x + 18, y + 112, w - 44);
+    text(p.cn, x + 18, y + 122, w - 44);
 
     fill(105);
     textSize(11);
     textLeading(16);
-    text(p.noteEn, x + 18, y + 148, w - 64);
-    text(p.noteCn, x + 18, y + 176, w - 64);
+    text(p.noteEn, x + 18, y + 170, w - 44);
+    text(p.noteCn, x + 18, y + 205, w - 44);
   } else {
     fill(mutedCol);
     textAlign(CENTER);
