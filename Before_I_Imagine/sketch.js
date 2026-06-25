@@ -128,6 +128,11 @@ let archivePan = { x: 0, y: 0 };
 let archiveSlicePanX = 0;
 let archiveSliceDragging = false;
 let archiveSliceLastX = 0;
+let wallCamera = { x: 0, y: 0, zoom: 1 };
+let wallMinZoom = 0.55;
+let wallMaxZoom = 2.6;
+let wallPressPoint = { x: 0, y: 0 };
+let wallDragDistance = 0;
 let isArchivePanning = false;
 let lastPanPoint = { x: 0, y: 0 };
 
@@ -1554,6 +1559,10 @@ function handlePointerPressed(x, y) {
     return true;
   }
 
+  if (page === "archiveWall" && handleArchiveWallPress(x, y)) {
+    return true;
+  }
+
   if (page === "draw" && handleDrawPageClick(x, y)) {
     return true;
   }
@@ -1612,7 +1621,12 @@ function handlePointerDragged(x, y) {
     let dx = x - lastPanPoint.x;
     let dy = y - lastPanPoint.y;
 
-    if (page === "layer") {
+    if (page === "archiveWall") {
+      wallCamera.x += dx / wallCamera.zoom;
+      wallCamera.y += dy / wallCamera.zoom;
+      wallDragDistance += abs(dx) + abs(dy);
+      constrainWallCamera();
+    } else if (page === "layer") {
       archivePan.x = constrain(archivePan.x + dx * 0.35, -width * 0.12, width * 0.12);
     } else {
       archivePan.x = 0;
@@ -1645,6 +1659,13 @@ function handlePointerReleased() {
   }
 
   if (isArchivePanning) {
+    if (page === "archiveWall" && wallDragDistance < 8) {
+      let hitIndex = getArchiveWallAppleAt(wallPressPoint.x, wallPressPoint.y);
+      if (hitIndex >= 0) {
+        selectedAppleIndex = hitIndex;
+        selectedApple = archive[hitIndex] || null;
+      }
+    }
     isArchivePanning = false;
   }
 
@@ -1669,6 +1690,51 @@ function archiveCanPanAt(x, y) {
     y > archiveHeaderHeight() &&
     y < height - 58
   );
+}
+
+function handleArchiveWallPress(x, y) {
+  if (pointInsideArchiveWallPopupClose(x, y)) {
+    selectedApple = null;
+    selectedAppleIndex = -1;
+    return true;
+  }
+
+  if (selectedApple && pointInsideArchiveWallPopup(x, y)) {
+    return true;
+  }
+
+  if (!archiveCanPanAt(x, y)) return false;
+
+  isArchivePanning = true;
+  wallPressPoint = { x: x, y: y };
+  wallDragDistance = 0;
+  lastPanPoint = { x: x, y: y };
+  return true;
+}
+
+function getArchiveWallPopupRect() {
+  return {
+    x: isMobileScreen() ? 20 : width - 292,
+    y: archiveHeaderHeight() + 18,
+    w: isMobileScreen() ? width - 40 : 250,
+    h: 298
+  };
+}
+
+function pointInsideArchiveWallPopup(x, y) {
+  if (page !== "archiveWall" || !selectedApple) return false;
+  return pointInsideRect(x, y, getArchiveWallPopupRect());
+}
+
+function pointInsideArchiveWallPopupClose(x, y) {
+  if (page !== "archiveWall" || !selectedApple) return false;
+  let r = getArchiveWallPopupRect();
+  return pointInsideRect(x, y, {
+    x: r.x + r.w - 34,
+    y: r.y + 16,
+    w: 22,
+    h: 22
+  });
 }
 
 function handleDrawPageClick(x, y) {
@@ -1818,6 +1884,18 @@ function isClickOnDrawingDomControl(x, y) {
 }
 
 function mouseWheel(event) {
+  if (page === "archiveWall") {
+    if (event.ctrlKey) {
+      let zoomFactor = exp(-event.delta * 0.0016);
+      zoomWallAt(mouseX, mouseY, zoomFactor);
+    } else {
+      wallCamera.x -= (event.deltaX || 0) / wallCamera.zoom;
+      wallCamera.y -= event.delta / wallCamera.zoom;
+      constrainWallCamera();
+    }
+    return false;
+  }
+
   if (isArchiveSliceMode()) {
     archiveSlicePanX -= event.delta;
     constrainArchiveSlicePan();
@@ -2480,11 +2558,6 @@ function generateArchiveWallLayout() {
 
     let jitterY = random(isMobileScreen() ? -12 : -18, isMobileScreen() ? 12 : 18);
 
-    let miniLayer = createGraphics(miniW, miniH);
-    miniLayer.pixelDensity(pd);
-    miniLayer.clear();
-    miniLayer.smooth();
-
     archiveWallLayout.push({
       x: centerX - miniW / 2,
       y: startY + row * spacingY + jitterY,
@@ -2494,7 +2567,7 @@ function generateArchiveWallLayout() {
       replaySpeed: 0.62 + ((i % 4) * 0.1),
       miniW: miniW,
       miniH: miniH,
-      miniLayer: miniLayer,
+      miniLayer: null,
       lastDrawnIndex: 0
     });
   }
@@ -2571,7 +2644,7 @@ function getLayerContentHeight() {
 function drawArchiveWallPage() {
   drawArchiveHeader(
     "Archive of Remembered Apples",
-    "A quiet exhibition wall of remembered forms."
+    "A zoomable memory field of remembered forms."
   );
 
   if (archive.length === 0) {
@@ -2581,39 +2654,152 @@ function drawArchiveWallPage() {
 
   clipBelowHeader();
   push();
-  translate(archivePan.x, archivePan.y);
+  applyWallCameraTransform();
 
   for (let i = 0; i < archive.length; i++) {
     let d = archive[i];
     let layout = archiveWallLayout[i];
     if (!layout) continue;
 
-    let totalUnits = countDrawingUnits(d);
-
-    updateMiniReplayLayer(d, layout);
-
     push();
     translate(layout.x, layout.y);
     scale(layout.scale);
-    tint(255, 230 * layout.alpha);
-    image(layout.miniLayer, 0, 0);
+    tint(255, 245 * layout.alpha);
+    drawStaticMini(d, layout.miniW, layout.miniH);
     noTint();
-    drawWallHoverLabel(d, i, layout);
+    drawWallSemanticLabel(d, i, layout);
     pop();
-
-    layout.replayIndex += layout.replaySpeed;
-
-    if (layout.replayIndex > totalUnits + 40) {
-      layout.replayIndex = 0;
-      layout.lastDrawnIndex = 0;
-      layout.miniLayer.clear();
-    }
   }
 
   pop();
   unclip();
 
-  drawArchiveFooter("Each apple is replayed from a participant's drawing trace.");
+  drawArchiveWallDetailPopup();
+  drawArchiveFooter("Scroll or pinch to zoom. Drag to move through the remembered apple field.");
+}
+
+function applyWallCameraTransform() {
+  translate(width / 2, height / 2);
+  scale(wallCamera.zoom);
+  translate(wallCamera.x - width / 2, wallCamera.y - height / 2);
+}
+
+function screenToWallWorld(x, y) {
+  return {
+    x: (x - width / 2) / wallCamera.zoom + width / 2 - wallCamera.x,
+    y: (y - height / 2) / wallCamera.zoom + height / 2 - wallCamera.y
+  };
+}
+
+function zoomWallAt(screenX, screenY, zoomFactor) {
+  let before = screenToWallWorld(screenX, screenY);
+  wallCamera.zoom = constrain(wallCamera.zoom * zoomFactor, wallMinZoom, wallMaxZoom);
+  wallCamera.x = (screenX - width / 2) / wallCamera.zoom + width / 2 - before.x;
+  wallCamera.y = (screenY - height / 2) / wallCamera.zoom + height / 2 - before.y;
+  constrainWallCamera();
+}
+
+function constrainWallCamera() {
+  let z = wallCamera.zoom;
+  let limitX = width * (0.55 + z * 0.45);
+  let limitY = height * (0.45 + z * 0.35);
+  wallCamera.x = constrain(wallCamera.x, -limitX, limitX);
+  wallCamera.y = constrain(wallCamera.y, -limitY, limitY);
+}
+
+function drawWallSemanticLabel(d, index, layout) {
+  if (wallCamera.zoom < 0.9) return;
+
+  noStroke();
+  fill(86, 78, 70, 145);
+  textAlign(LEFT);
+  textSize(10);
+  text(`#${index + 1}`, 4, layout.miniH + 14);
+
+  if (wallCamera.zoom >= 1.5) {
+    let promptLabel = getArchiveTaskTitle(getDrawingPromptIndex(d)).split(" — ")[0];
+    let duration = d.durationSeconds !== undefined ? `${d.durationSeconds}s` : "undated";
+    fill(86, 78, 70, 118);
+    textSize(8.5);
+    text(promptLabel, 4, layout.miniH + 28);
+    text(duration, 4, layout.miniH + 40);
+  }
+
+  if (wallCamera.zoom >= 2.0) {
+    fill(86, 78, 70, 105);
+    textSize(8.5);
+    text(`${countDrawingUnits(d)} trace units`, 4, layout.miniH + 52);
+  }
+}
+
+function getArchiveWallAppleAt(screenX, screenY) {
+  let p = screenToWallWorld(screenX, screenY);
+
+  for (let i = archiveWallLayout.length - 1; i >= 0; i--) {
+    let layout = archiveWallLayout[i];
+    if (!layout) continue;
+
+    let lx = (p.x - layout.x) / layout.scale;
+    let ly = (p.y - layout.y) / layout.scale;
+
+    if (lx >= 0 && lx <= layout.miniW && ly >= 0 && ly <= layout.miniH) {
+      return i;
+    }
+  }
+
+  return -1;
+}
+
+function drawArchiveWallDetailPopup() {
+  if (page !== "archiveWall" || !selectedApple) return;
+
+  let r = getArchiveWallPopupRect();
+
+  drawingContext.save();
+  drawingContext.shadowColor = "rgba(42, 35, 25, 0.13)";
+  drawingContext.shadowBlur = 22;
+  drawingContext.shadowOffsetY = 12;
+  noStroke();
+  fill(251, 250, 246, 236);
+  rect(r.x, r.y, r.w, r.h, 6);
+  drawingContext.restore();
+
+  let close = { x: r.x + r.w - 32, y: r.y + 18, w: 16, h: 16 };
+  stroke(inkCol);
+  strokeWeight(1.1);
+  line(close.x, close.y, close.x + close.w, close.y + close.h);
+  line(close.x + close.w, close.y, close.x, close.y + close.h);
+
+  noStroke();
+  fill(inkCol);
+  textAlign(LEFT);
+  textSize(13);
+  text(`#${selectedAppleIndex + 1}`, r.x + 18, r.y + 28);
+
+  fill(80);
+  textSize(10);
+  text(formatArchiveTime(selectedApple), r.x + 18, r.y + 48);
+  text(`${selectedApple.durationSeconds || 0}s · ${countDrawingUnits(selectedApple)} trace units`, r.x + 18, r.y + 65);
+
+  let thumbY = r.y + 82;
+  fill(paperCol);
+  stroke(226, 220, 210);
+  rect(r.x + 18, thumbY, r.w - 36, 120, 4);
+
+  push();
+  translate(r.x + 30, thumbY + 12);
+  drawStaticMini(selectedApple, r.w - 60, 96);
+  pop();
+
+  let promptKey = getDrawingPromptIndex(selectedApple);
+  let taskText = prompts[promptKey] ? prompts[promptKey].task : "TASK";
+  let titleText = prompts[promptKey] ? prompts[promptKey].shortTitle : "";
+  noStroke();
+  fill(inkCol);
+  textSize(10);
+  text(taskText, r.x + 18, thumbY + 148);
+  fill(82);
+  text(titleText, r.x + 18, thumbY + 168, r.w - 36);
 }
 
 // -------------------------
