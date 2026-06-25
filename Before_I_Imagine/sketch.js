@@ -656,7 +656,6 @@ function drawImmersiveDrawingPage() {
     drawReopenDrawingButton();
   }
 
-  drawSelectedApplePopup();
 }
 
 function drawPaperBackground() {
@@ -916,7 +915,7 @@ function generateDrawBackgroundApplesLayout() {
 
   let mobile = isMobileScreen();
   let sidebarW = mobile ? 0 : getDrawSidebarWidth();
-  let count = min(archive.length, mobile ? 8 : 16);
+  let count = archive.length;
   let recent = archive.slice(-count);
   let left = sidebarW + (mobile ? 18 : 34);
   let right = width - (mobile ? 18 : 34);
@@ -928,32 +927,6 @@ function generateDrawBackgroundApplesLayout() {
   if (backgroundViewMode === "slice") {
     cardW = mobile ? 88 : 128;
     cardH = mobile ? 94 : 142;
-  }
-
-  if (backgroundLayoutMode === "grid") {
-    let gapX = mobile ? 18 : 34;
-    let gapY = mobile ? 18 : 32;
-    let cols = max(1, floor((right - left) / (cardW + gapX)));
-    let startX = left + ((right - left) - (cols * cardW + (cols - 1) * gapX)) / 2;
-
-    for (let i = 0; i < recent.length; i++) {
-      let col = i % cols;
-      let row = floor(i / cols);
-      drawBackgroundApplesLayout.push({
-        archiveIndex: archive.indexOf(recent[i]),
-        x: startX + col * (cardW + gapX) + cardW / 2,
-        y: top + row * (cardH + gapY) + cardH / 2,
-        cardW: cardW,
-        cardH: cardH,
-        size: backgroundViewMode === "slice" ? cardW * 0.7 : cardW,
-        rotation: 0,
-        phase: random(TWO_PI),
-        speed: 0.00012,
-        drift: 1.5,
-        alpha: 0.62
-      });
-    }
-    return;
   }
 
   for (let i = 0; i < recent.length; i++) {
@@ -996,13 +969,13 @@ function drawFloatingArchiveApples() {
       item.cachedThumb = getCachedStaticMini(d, item.cachedThumbSize, item.cachedThumbSize);
     }
 
-    let t = backgroundLayoutMode === "grid" ? item.phase : millis() * item.speed + item.phase;
-    let floatX = backgroundLayoutMode === "grid" ? 0 : sin(t * 0.8) * item.drift;
-    let floatY = backgroundLayoutMode === "grid" ? 0 : cos(t) * item.drift;
+    let t = millis() * item.speed + item.phase;
+    let floatX = sin(t * 0.8) * item.drift;
+    let floatY = cos(t) * item.drift;
 
     push();
     translate(item.x + floatX, item.y + floatY);
-    rotate(backgroundLayoutMode === "grid" ? 0 : item.rotation + sin(t * 1.4) * 0.025);
+    rotate(item.rotation + sin(t * 1.4) * 0.025);
 
     if (backgroundViewMode === "slice") {
       drawFloatingSliceCard(d, item);
@@ -1579,20 +1552,6 @@ function handleDrawPageClick(x, y) {
     return false;
   }
 
-  let cardIndex = getAppleCardAt(x, y);
-  if (cardIndex >= 0) {
-    selectedAppleIndex = cardIndex;
-    selectedApple = archive[cardIndex] || null;
-    return true;
-  }
-
-  if (
-    !isClickOnViewSwitcher(x, y)
-  ) {
-    toggleBackgroundLayout();
-    return true;
-  }
-
   return false;
 }
 
@@ -1651,26 +1610,6 @@ function isClickOnApplePopupClose(x, y) {
 }
 
 function getAppleCardAt(x, y) {
-  if (archive.length === 0) return -1;
-
-  for (let i = drawBackgroundApplesLayout.length - 1; i >= 0; i--) {
-    let item = drawBackgroundApplesLayout[i];
-    let t = backgroundLayoutMode === "grid" ? item.phase : millis() * item.speed + item.phase;
-    let cx = item.x + (backgroundLayoutMode === "grid" ? 0 : sin(t * 0.8) * item.drift);
-    let cy = item.y + (backgroundLayoutMode === "grid" ? 0 : cos(t) * item.drift);
-    let hitW = item.cardW || item.size;
-    let hitH = item.cardH || item.size;
-
-    if (
-      x >= cx - hitW / 2 &&
-      x <= cx + hitW / 2 &&
-      y >= cy - hitH / 2 &&
-      y <= cy + hitH / 2
-    ) {
-      return item.archiveIndex;
-    }
-  }
-
   return -1;
 }
 
