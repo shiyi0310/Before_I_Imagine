@@ -1024,32 +1024,14 @@ function drawFloatingArchiveApples() {
 }
 
 function drawFloatingWallCard(d, item) {
-  drawingContext.save();
-  drawingContext.shadowColor = "rgba(50, 42, 32, 0.09)";
-  drawingContext.shadowBlur = 10;
-  drawingContext.shadowOffsetY = 7;
+  if (!item.cachedThumb) return;
+
   push();
   translate(-item.size / 2, -item.size / 2);
   tint(255, 255 * min(0.92, item.alpha + 0.12));
-  drawStaticMini(d, item.size, item.size);
+  image(item.cachedThumb, 0, 0, item.size, item.size);
   noTint();
   pop();
-  drawingContext.restore();
-
-  drawWallMotionMarks(item.size);
-}
-
-function drawWallMotionMarks(s) {
-  if (backgroundLayoutMode === "grid") return;
-
-  noFill();
-  stroke(78, 72, 66, 56);
-  strokeWeight(1);
-  let left = -s * 0.58;
-  let right = s * 0.58;
-  let y = -s * 0.1;
-  arc(left, y, 10, 20, HALF_PI, HALF_PI + PI * 0.65);
-  arc(right, y, 10, 20, -HALF_PI - PI * 0.65, -HALF_PI);
 }
 
 function drawFloatingSliceCard(d, item) {
