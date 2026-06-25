@@ -922,12 +922,12 @@ function generateDrawBackgroundApplesLayout() {
   let right = width - (mobile ? 18 : 34);
   let top = mobile ? 86 : 28;
   let bottom = height - (mobile ? 190 : 40);
-  let cardW = mobile ? 86 : 138;
-  let cardH = mobile ? 96 : 150;
+  let cardW = mobile ? 62 : 86;
+  let cardH = mobile ? 62 : 86;
 
   if (backgroundViewMode === "slice") {
-    cardW = mobile ? 68 : 96;
-    cardH = mobile ? 68 : 96;
+    cardW = mobile ? 88 : 128;
+    cardH = mobile ? 94 : 142;
   }
 
   if (backgroundLayoutMode === "grid") {
@@ -945,7 +945,7 @@ function generateDrawBackgroundApplesLayout() {
         y: top + row * (cardH + gapY) + cardH / 2,
         cardW: cardW,
         cardH: cardH,
-        size: backgroundViewMode === "slice" ? cardW * 0.78 : cardW * 0.62,
+        size: backgroundViewMode === "slice" ? cardW * 0.7 : cardW,
         rotation: 0,
         phase: random(TWO_PI),
         speed: 0.00012,
@@ -1012,7 +1012,11 @@ function drawFloatingArchiveApples() {
       fill(120, 112, 104, 105);
       textAlign(LEFT);
       textSize(9);
-      text(`#${item.archiveIndex + 1}`, item.cardW * 0.25, item.cardH * 0.34);
+      if (backgroundViewMode === "wall") {
+        text(`#${item.archiveIndex + 1}`, item.size * 0.44, item.size * 0.18);
+      } else {
+        text(`#${item.archiveIndex + 1}`, item.cardW * 0.25, item.cardH * 0.34);
+      }
     }
 
     pop();
@@ -1020,35 +1024,32 @@ function drawFloatingArchiveApples() {
 }
 
 function drawFloatingWallCard(d, item) {
-  let w = item.cardW;
-  let h = item.cardH;
-
   drawingContext.save();
-  drawingContext.shadowColor = "rgba(50, 42, 32, 0.11)";
-  drawingContext.shadowBlur = 22;
-  drawingContext.shadowOffsetY = 16;
-  noStroke();
-  fill(255, 253, 248, 78);
-  rect(-w / 2, -h / 2, w, h, 8);
-  drawingContext.restore();
-
-  stroke(255, 255, 255, 70);
-  strokeWeight(1);
-  noFill();
-  rect(-w / 2 + 0.5, -h / 2 + 0.5, w - 1, h - 1, 8);
-
+  drawingContext.shadowColor = "rgba(50, 42, 32, 0.09)";
+  drawingContext.shadowBlur = 10;
+  drawingContext.shadowOffsetY = 7;
   push();
-  translate(-item.size / 2, -item.size / 2 - 8);
-  tint(255, 255 * item.alpha);
+  translate(-item.size / 2, -item.size / 2);
+  tint(255, 255 * min(0.92, item.alpha + 0.12));
   drawStaticMini(d, item.size, item.size);
   noTint();
   pop();
+  drawingContext.restore();
 
-  noStroke();
-  fill(132, 124, 116, 80);
-  textAlign(CENTER);
-  textSize(8);
-  text(formatRelativeArchiveTime(d, 0), 0, h / 2 - 16);
+  drawWallMotionMarks(item.size);
+}
+
+function drawWallMotionMarks(s) {
+  if (backgroundLayoutMode === "grid") return;
+
+  noFill();
+  stroke(78, 72, 66, 56);
+  strokeWeight(1);
+  let left = -s * 0.58;
+  let right = s * 0.58;
+  let y = -s * 0.1;
+  arc(left, y, 10, 20, HALF_PI, HALF_PI + PI * 0.65);
+  arc(right, y, 10, 20, -HALF_PI - PI * 0.65, -HALF_PI);
 }
 
 function drawFloatingSliceCard(d, item) {
