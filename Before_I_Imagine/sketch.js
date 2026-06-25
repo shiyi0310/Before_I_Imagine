@@ -108,6 +108,11 @@ let oldStorageKeys = [
 let archiveWallLayout = [];
 let layerLayout = [];
 let drawBackgroundApplesLayout = [];
+let modalOpen = true;
+let backgroundViewMode = "wall";
+let backgroundLayoutMode = "float";
+let selectedApple = null;
+let selectedAppleIndex = -1;
 let layerReplayIndex = 0;
 let maxLayerUnits = 0;
 let stackBuffer = null;
@@ -468,7 +473,7 @@ function updateToolButtonStyles() {
 }
 
 function updateButtonVisibility() {
-  if (page === "draw") {
+  if (page === "draw" && modalOpen) {
     colorPicker.show();
     sizeSlider.show();
 
@@ -617,17 +622,26 @@ function drawImmersiveDrawingPage() {
   drawPaperBackground();
   drawFloatingArchiveApples();
   drawDrawPageSidebar();
-  drawDrawingModalShadow();
-  if (isMobileScreen()) drawDrawingTitle();
-  drawPromptCard(p);
-  drawDrawingSurface();
+  drawBackgroundViewSwitcher();
 
-  clipRect(drawLayout.drawX, drawLayout.drawY, drawLayout.drawW, drawLayout.drawH);
-  image(drawingLayer, 0, 0);
-  unclip();
+  if (modalOpen) {
+    drawDrawingModalShadow();
+    if (isMobileScreen()) drawDrawingTitle();
+    drawPromptCard(p);
+    drawDrawingSurface();
 
-  drawToolbarPanel();
-  drawDrawingFooter();
+    clipRect(drawLayout.drawX, drawLayout.drawY, drawLayout.drawW, drawLayout.drawH);
+    image(drawingLayer, 0, 0);
+    unclip();
+
+    drawToolbarPanel();
+    drawDrawingModalClose();
+    drawDrawingFooter();
+  } else {
+    drawReopenDrawingButton();
+  }
+
+  drawSelectedApplePopup();
 }
 
 function drawPaperBackground() {
@@ -663,6 +677,101 @@ function drawDrawingModalShadow() {
   rect(x + 0.5, y + 0.5, w - 1, h - 1, 10);
 }
 
+function getBackgroundViewSwitcherRect() {
+  let w = isMobileScreen() ? 210 : 300;
+  let h = isMobileScreen() ? 40 : 52;
+  let x = isMobileScreen() ? (width - w) / 2 : getDrawSidebarWidth() + (width - getDrawSidebarWidth() - w) / 2;
+  let y = isMobileScreen() ? 20 : 28;
+
+  return { x: x, y: y, w: w, h: h };
+}
+
+function drawBackgroundViewSwitcher() {
+  if (isMobileScreen()) return;
+
+  let r = getBackgroundViewSwitcherRect();
+
+  drawingContext.save();
+  drawingContext.shadowColor = "rgba(42, 35, 25, 0.11)";
+  drawingContext.shadowBlur = 18;
+  drawingContext.shadowOffsetY = 8;
+  noStroke();
+  fill(251, 250, 246, 230);
+  rect(r.x, r.y, r.w, r.h, r.h / 2);
+  drawingContext.restore();
+
+  noStroke();
+  fill(mutedCol);
+  textAlign(LEFT, CENTER);
+  textSize(11);
+  text("VIEW", r.x + 24, r.y + r.h / 2);
+
+  drawSwitcherOption("wall", "●  WALL", r.x + 118, r.y + r.h / 2);
+
+  stroke(156, 148, 137, 150);
+  strokeWeight(1);
+  line(r.x + 186, r.y + 15, r.x + 186, r.y + r.h - 15);
+
+  drawSwitcherOption("slice", "◌  SLICE", r.x + 218, r.y + r.h / 2);
+}
+
+function drawSwitcherOption(mode, label, x, y) {
+  noStroke();
+  fill(backgroundViewMode === mode ? inkCol : mutedCol);
+  textAlign(LEFT, CENTER);
+  textSize(11);
+  text(label, x, y);
+}
+
+function drawDrawingModalClose() {
+  let r = getModalCloseRect();
+
+  stroke(inkCol);
+  strokeWeight(1.4);
+  line(r.x + 4, r.y + 4, r.x + r.w - 4, r.y + r.h - 4);
+  line(r.x + r.w - 4, r.y + 4, r.x + 4, r.y + r.h - 4);
+}
+
+function getModalCloseRect() {
+  return {
+    x: drawLayout.modalX + drawLayout.modalW - 42,
+    y: drawLayout.modalY + 28,
+    w: 18,
+    h: 18
+  };
+}
+
+function drawReopenDrawingButton() {
+  let r = getReopenDrawingButtonRect();
+
+  drawingContext.save();
+  drawingContext.shadowColor = "rgba(42, 35, 25, 0.12)";
+  drawingContext.shadowBlur = 18;
+  drawingContext.shadowOffsetY = 8;
+  noStroke();
+  fill(251, 250, 246, 235);
+  rect(r.x, r.y, r.w, r.h, 4);
+  drawingContext.restore();
+
+  noStroke();
+  fill(inkCol);
+  textAlign(CENTER, CENTER);
+  textSize(isMobileScreen() ? 12 : 13);
+  text("Draw an apple", r.x + r.w / 2, r.y + r.h / 2);
+}
+
+function getReopenDrawingButtonRect() {
+  let w = isMobileScreen() ? 140 : 150;
+  let h = isMobileScreen() ? 40 : 44;
+  let sidebarW = isMobileScreen() ? 0 : getDrawSidebarWidth();
+  return {
+    x: sidebarW + (width - sidebarW - w) / 2,
+    y: isMobileScreen() ? 104 : 104,
+    w: w,
+    h: h
+  };
+}
+
 function drawDrawPageSidebar() {
   if (isMobileScreen()) return;
 
@@ -685,40 +794,43 @@ function drawDrawPageSidebar() {
 
   fill(inkCol);
   textSize(11);
-  text("•  ARCHIVE WALL", 30, 180);
-  textSize(42);
-  text(String(archive.length), 30, 238);
+  text("•  ARCHIVE WALL", 30, 150);
+  textSize(34);
+  text(String(archive.length), 30, 202);
   fill(mutedCol);
   textSize(12);
-  text("Apples collected", 30, 266);
+  text("Apples collected", 30, 226);
 
-  drawSidebarSparkline(30, 308, w - 60, 28);
+  drawSidebarSparkline(30, 266, w - 60, 26);
 
   fill(mutedCol);
   textSize(11);
-  text("RECENT APPLES", 30, 426);
-  drawSidebarRecentApples(30, 462, w - 60);
+  text("RECENT APPLES", 30, 344);
+  drawSidebarRecentApples(30, 374, w - 60);
 
   stroke(226, 220, 210);
   strokeWeight(1);
-  line(30, height - 292, w - 30, height - 292);
+  let aboutY = max(528, min(height - 232, 560));
+  line(30, aboutY - 28, w - 30, aboutY - 28);
 
   noStroke();
   fill(inkCol);
   textSize(11);
-  text("ABOUT", 30, height - 238);
+  text("ABOUT", 30, aboutY);
   fill(70);
   textSize(11);
   textLeading(19);
-  text("Draw from memory.\nNot from images.\nNot from search.\nJust what comes first.", 30, height - 206);
+  text("Draw from memory.\nNot from images.\nNot from search.\nJust what comes first.", 30, aboutY + 32);
 
-  noFill();
-  stroke(210, 204, 194);
-  rect(30, height - 88, w - 60, 44, 2);
-  noStroke();
-  fill(74);
-  textSize(10);
-  text("ABOUT THE PROJECT  ›", 44, height - 61);
+  if (height > 690) {
+    noFill();
+    stroke(210, 204, 194);
+    rect(30, height - 88, w - 60, 44, 2);
+    noStroke();
+    fill(74);
+    textSize(10);
+    text("ABOUT THE PROJECT  ›", 44, height - 61);
+  }
 }
 
 function drawSidebarSparkline(x, y, w, h) {
@@ -749,26 +861,27 @@ function drawSidebarSparkline(x, y, w, h) {
 
 function drawSidebarRecentApples(x, y, w) {
   let recent = archive.slice(-5).reverse();
-  let rowH = 38;
+  let rowH = 32;
+  let maxItems = height < 690 ? 3 : 5;
 
-  for (let i = 0; i < 5; i++) {
+  for (let i = 0; i < maxItems; i++) {
     let rowY = y + i * rowH;
     if (recent[i]) {
       push();
-      translate(x, rowY - 14);
-      drawStaticMini(recent[i], 28, 28);
+      translate(x, rowY - 12);
+      drawStaticMini(recent[i], 24, 24);
       pop();
     } else {
       noFill();
       stroke(205, 199, 190);
-      circle(x + 14, rowY, 22);
+      circle(x + 12, rowY, 18);
     }
 
     noStroke();
     fill(146);
     textAlign(LEFT);
     textSize(10);
-    text(recent[i] ? formatRelativeArchiveTime(recent[i], i) : "waiting", x + 44, rowY + 4);
+    text(recent[i] ? formatRelativeArchiveTime(recent[i], i) : "waiting", x + 38, rowY + 4);
   }
 }
 
@@ -794,6 +907,39 @@ function generateDrawBackgroundApplesLayout() {
   let right = width - (mobile ? 18 : 34);
   let top = mobile ? 86 : 28;
   let bottom = height - (mobile ? 190 : 40);
+  let cardW = mobile ? 86 : 138;
+  let cardH = mobile ? 96 : 150;
+
+  if (backgroundViewMode === "slice") {
+    cardW = mobile ? 68 : 96;
+    cardH = mobile ? 68 : 96;
+  }
+
+  if (backgroundLayoutMode === "grid") {
+    let gapX = mobile ? 18 : 34;
+    let gapY = mobile ? 18 : 32;
+    let cols = max(1, floor((right - left) / (cardW + gapX)));
+    let startX = left + ((right - left) - (cols * cardW + (cols - 1) * gapX)) / 2;
+
+    for (let i = 0; i < recent.length; i++) {
+      let col = i % cols;
+      let row = floor(i / cols);
+      drawBackgroundApplesLayout.push({
+        archiveIndex: archive.indexOf(recent[i]),
+        x: startX + col * (cardW + gapX) + cardW / 2,
+        y: top + row * (cardH + gapY) + cardH / 2,
+        cardW: cardW,
+        cardH: cardH,
+        size: backgroundViewMode === "slice" ? cardW * 0.78 : cardW * 0.62,
+        rotation: 0,
+        phase: random(TWO_PI),
+        speed: 0.00012,
+        drift: 1.5,
+        alpha: 0.62
+      });
+    }
+    return;
+  }
 
   for (let i = 0; i < recent.length; i++) {
     let colBias = i % 4;
@@ -811,6 +957,8 @@ function generateDrawBackgroundApplesLayout() {
       archiveIndex: archive.indexOf(recent[i]),
       x: x,
       y: random(top, bottom),
+      cardW: cardW,
+      cardH: cardH,
       size: random(mobile ? 34 : 42, mobile ? 58 : 76),
       rotation: random(-0.18, 0.18),
       phase: random(TWO_PI),
@@ -838,25 +986,196 @@ function drawFloatingArchiveApples() {
     translate(item.x + floatX, item.y + floatY);
     rotate(item.rotation + sin(t * 1.4) * 0.025);
 
-    drawingContext.save();
-    drawingContext.shadowColor = "rgba(50, 42, 32, 0.16)";
-    drawingContext.shadowBlur = 18;
-    drawingContext.shadowOffsetY = 14;
-    tint(255, 255 * item.alpha);
-    drawStaticMini(d, s, s);
-    noTint();
-    drawingContext.restore();
+    if (backgroundViewMode === "slice") {
+      drawFloatingSliceCard(d, item);
+    } else {
+      drawFloatingWallCard(d, item);
+    }
 
     if (!isMobileScreen() && item.archiveIndex % 5 === 0) {
       noStroke();
       fill(120, 112, 104, 105);
       textAlign(LEFT);
       textSize(9);
-      text(`#${item.archiveIndex + 1}`, s * 0.52, s * 0.22);
+      text(`#${item.archiveIndex + 1}`, item.cardW * 0.25, item.cardH * 0.34);
     }
 
     pop();
   }
+}
+
+function drawFloatingWallCard(d, item) {
+  let w = item.cardW;
+  let h = item.cardH;
+
+  drawingContext.save();
+  drawingContext.shadowColor = "rgba(50, 42, 32, 0.11)";
+  drawingContext.shadowBlur = 22;
+  drawingContext.shadowOffsetY = 16;
+  noStroke();
+  fill(255, 253, 248, 78);
+  rect(-w / 2, -h / 2, w, h, 8);
+  drawingContext.restore();
+
+  stroke(255, 255, 255, 70);
+  strokeWeight(1);
+  noFill();
+  rect(-w / 2 + 0.5, -h / 2 + 0.5, w - 1, h - 1, 8);
+
+  push();
+  translate(-item.size / 2, -item.size / 2 - 8);
+  tint(255, 255 * item.alpha);
+  drawStaticMini(d, item.size, item.size);
+  noTint();
+  pop();
+
+  noStroke();
+  fill(132, 124, 116, 80);
+  textAlign(CENTER);
+  textSize(8);
+  text(formatRelativeArchiveTime(d, 0), 0, h / 2 - 16);
+}
+
+function drawFloatingSliceCard(d, item) {
+  let r = item.cardW * 0.47;
+
+  drawingContext.save();
+  drawingContext.shadowColor = "rgba(50, 42, 32, 0.13)";
+  drawingContext.shadowBlur = 18;
+  drawingContext.shadowOffsetY = 12;
+  noStroke();
+  fill(255, 253, 248, 92);
+  circle(0, 0, r * 2);
+  drawingContext.restore();
+
+  stroke(216, 56, 42, 150);
+  strokeWeight(1.2);
+  noFill();
+  circle(0, 0, r * 2 - 2);
+  stroke(238, 214, 154, 120);
+  circle(0, 0, r * 1.48);
+
+  push();
+  translate(-item.size / 2, -item.size / 2);
+  tint(255, 255 * item.alpha);
+  drawStaticMini(d, item.size, item.size);
+  noTint();
+  pop();
+}
+
+function drawSelectedApplePopup() {
+  if (page !== "draw" || !selectedApple) return;
+
+  let r = getApplePopupRect();
+  let close = getApplePopupCloseRect();
+
+  drawingContext.save();
+  drawingContext.shadowColor = "rgba(42, 35, 25, 0.14)";
+  drawingContext.shadowBlur = 24;
+  drawingContext.shadowOffsetY = 14;
+  noStroke();
+  fill(251, 250, 246, 232);
+  rect(r.x, r.y, r.w, r.h, 8);
+  drawingContext.restore();
+
+  noFill();
+  stroke(255, 255, 255, 120);
+  rect(r.x + 0.5, r.y + 0.5, r.w - 1, r.h - 1, 8);
+
+  noStroke();
+  fill(inkCol);
+  textAlign(LEFT);
+  textSize(13);
+  text(`#${selectedAppleIndex + 1}`, r.x + 22, r.y + 30);
+
+  fill(72);
+  textSize(10);
+  text(formatArchiveTime(selectedApple), r.x + 22, r.y + 50);
+
+  let duration = selectedApple.durationSeconds !== undefined ? `${selectedApple.durationSeconds}s` : "";
+  text(duration, r.x + 22, r.y + 66);
+
+  stroke(inkCol);
+  strokeWeight(1.2);
+  line(close.x + 2, close.y + 2, close.x + close.w - 2, close.y + close.h - 2);
+  line(close.x + close.w - 2, close.y + 2, close.x + 2, close.y + close.h - 2);
+
+  let thumbX = r.x + 22;
+  let thumbY = r.y + 88;
+  let thumbW = r.w - 44;
+  let thumbH = min(190, r.h * 0.34);
+
+  fill(paperCol);
+  stroke(226, 220, 210);
+  rect(thumbX, thumbY, thumbW, thumbH, 4);
+
+  push();
+  translate(thumbX + 16, thumbY + 14);
+  drawStaticMini(selectedApple, thumbW - 32, thumbH - 28);
+  pop();
+
+  let promptKey = getDrawingPromptIndex(selectedApple);
+  let taskText = prompts[promptKey] ? prompts[promptKey].task : "TASK";
+  let titleText = prompts[promptKey] ? prompts[promptKey].shortTitle : "";
+  let textY = thumbY + thumbH + 36;
+
+  noStroke();
+  fill(inkCol);
+  textSize(11);
+  text(taskText, r.x + 22, textY);
+  fill(70);
+  textSize(10);
+  text(titleText, r.x + 22, textY + 24, r.w - 44);
+
+  let extraY = textY + 62;
+  if (selectedApple.match !== undefined) {
+    fill(inkCol);
+    textSize(10);
+    text("MATCH", r.x + 22, extraY);
+    stroke(205, 198, 188);
+    line(r.x + 22, extraY + 20, r.x + r.w - 22, extraY + 20);
+    stroke("#2470ff");
+    let mx = map(Number(selectedApple.match), 0, 1, r.x + 22, r.x + r.w - 22);
+    line(r.x + 22, extraY + 20, mx, extraY + 20);
+    noStroke();
+    fill("#2470ff");
+    circle(mx, extraY + 20, 8);
+    extraY += 56;
+  }
+
+  if (selectedApple.notes) {
+    fill(inkCol);
+    textSize(10);
+    text("NOTES", r.x + 22, extraY);
+    fill(70);
+    textSize(10);
+    text(selectedApple.notes, r.x + 22, extraY + 26, r.w - 44, 70);
+  }
+}
+
+function getApplePopupRect() {
+  let w = isMobileScreen() ? min(width - 36, 310) : 300;
+  let h = isMobileScreen() ? min(height - 120, 440) : 460;
+  let sidebarW = isMobileScreen() ? 0 : getDrawSidebarWidth();
+  let x = isMobileScreen() ? (width - w) / 2 : width - w - 42;
+  let y = isMobileScreen() ? 96 : max(126, (height - h) / 2);
+
+  if (!isMobileScreen() && modalOpen && x < drawLayout.modalX + drawLayout.modalW + 24) {
+    x = max(sidebarW + 24, drawLayout.modalX + drawLayout.modalW + 24);
+    if (x + w > width - 24) x = width - w - 24;
+  }
+
+  return { x: x, y: y, w: w, h: h };
+}
+
+function getApplePopupCloseRect() {
+  let r = getApplePopupRect();
+  return {
+    x: r.x + r.w - 34,
+    y: r.y + 28,
+    w: 18,
+    h: 18
+  };
 }
 
 function drawDrawingTitle() {
@@ -1064,6 +1383,11 @@ function touchStarted() {
     let x = touches[0].x;
     let y = touches[0].y;
 
+    if (page === "draw") {
+      let handled = handlePointerPressed(x, y);
+      return !handled;
+    }
+
     if (page === "stack" && handleStackControlPress(x, y)) {
       return false;
     }
@@ -1111,17 +1435,21 @@ function touchEnded() {
 
 function handlePointerPressed(x, y) {
   if (page === "stack" && handleStackControlPress(x, y)) {
-    return;
+    return true;
+  }
+
+  if (page === "draw" && handleDrawPageClick(x, y)) {
+    return true;
   }
 
   if (page === "draw" && pointInsideUndoButton(x, y)) {
-    return;
+    return true;
   }
 
-  if (page === "draw" && pointInsideDrawingArea(x, y)) {
+  if (page === "draw" && modalOpen && pointInsideDrawingArea(x, y)) {
     if (currentTool === "bucket") {
       bucketFillAt(x, y);
-      return;
+      return true;
     }
 
     if (currentTool === "brush" || currentTool === "eraser") {
@@ -1135,11 +1463,15 @@ function handlePointerPressed(x, y) {
 
       let p = createPoint(x, y);
       currentAction.points.push(p);
+      return true;
     }
   } else if (archiveCanPanAt(x, y)) {
     isArchivePanning = true;
     lastPanPoint = { x: x, y: y };
+    return true;
   }
+
+  return false;
 }
 
 function handlePointerDragged(x, y) {
@@ -1206,6 +1538,150 @@ function archiveCanPanAt(x, y) {
   );
 }
 
+function handleDrawPageClick(x, y) {
+  if (isClickOnApplePopupClose(x, y)) {
+    selectedApple = null;
+    selectedAppleIndex = -1;
+    return true;
+  }
+
+  if (isClickOnApplePopup(x, y)) {
+    return true;
+  }
+
+  let switchMode = getViewSwitcherHit(x, y);
+  if (switchMode) {
+    if (backgroundViewMode !== switchMode) {
+      backgroundViewMode = switchMode;
+      selectedApple = null;
+      selectedAppleIndex = -1;
+      generateDrawBackgroundApplesLayout();
+    }
+    return true;
+  }
+
+  if (modalOpen && isClickOnModalClose(x, y)) {
+    modalOpen = false;
+    currentAction = null;
+    layoutInterface();
+    return true;
+  }
+
+  if (!modalOpen && isClickOnReopenDrawingButton(x, y)) {
+    modalOpen = true;
+    layoutInterface();
+    return true;
+  }
+
+  if (isClickOnSidebar(x, y) || isClickOnModal(x, y) || isClickOnDrawingDomControl(x, y)) {
+    return false;
+  }
+
+  let cardIndex = getAppleCardAt(x, y);
+  if (cardIndex >= 0) {
+    selectedAppleIndex = cardIndex;
+    selectedApple = archive[cardIndex] || null;
+    return true;
+  }
+
+  if (
+    !isClickOnViewSwitcher(x, y)
+  ) {
+    toggleBackgroundLayout();
+    return true;
+  }
+
+  return false;
+}
+
+function toggleBackgroundLayout() {
+  backgroundLayoutMode = backgroundLayoutMode === "float" ? "grid" : "float";
+  generateDrawBackgroundApplesLayout();
+}
+
+function getViewSwitcherHit(x, y) {
+  if (isMobileScreen()) return null;
+  let r = getBackgroundViewSwitcherRect();
+  if (!pointInsideRect(x, y, r)) return null;
+
+  if (x < r.x + r.w * 0.62) return "wall";
+  return "slice";
+}
+
+function isClickOnModal(x, y) {
+  if (!modalOpen) return false;
+  return pointInsideRect(x, y, {
+    x: drawLayout.modalX,
+    y: drawLayout.modalY,
+    w: drawLayout.modalW,
+    h: drawLayout.modalH
+  });
+}
+
+function isClickOnSidebar(x, y) {
+  return !isMobileScreen() && x <= getDrawSidebarWidth();
+}
+
+function isClickOnViewSwitcher(x, y) {
+  return !isMobileScreen() && pointInsideRect(x, y, getBackgroundViewSwitcherRect());
+}
+
+function isClickOnModalClose(x, y) {
+  return modalOpen && pointInsideRect(x, y, getModalCloseRect());
+}
+
+function isClickOnReopenDrawingButton(x, y) {
+  return !modalOpen && pointInsideRect(x, y, getReopenDrawingButtonRect());
+}
+
+function isClickOnApplePopup(x, y) {
+  return selectedApple && pointInsideRect(x, y, getApplePopupRect());
+}
+
+function isClickOnApplePopupClose(x, y) {
+  return selectedApple && pointInsideRect(x, y, getApplePopupCloseRect());
+}
+
+function getAppleCardAt(x, y) {
+  if (archive.length === 0) return -1;
+
+  for (let i = drawBackgroundApplesLayout.length - 1; i >= 0; i--) {
+    let item = drawBackgroundApplesLayout[i];
+    let t = millis() * item.speed + item.phase;
+    let cx = item.x + sin(t * 0.8) * item.drift;
+    let cy = item.y + cos(t) * item.drift;
+    let hitW = item.cardW || item.size;
+    let hitH = item.cardH || item.size;
+
+    if (
+      x >= cx - hitW / 2 &&
+      x <= cx + hitW / 2 &&
+      y >= cy - hitH / 2 &&
+      y <= cy + hitH / 2
+    ) {
+      return item.archiveIndex;
+    }
+  }
+
+  return -1;
+}
+
+function isClickOnDrawingDomControl(x, y) {
+  if (!modalOpen) return false;
+  let controls = [colorPicker, sizeSlider, brushBtn, bucketBtn, eraserBtn, undoBtn, clearBtn, submitBtn, nextPromptBtn, archiveBtn];
+
+  for (let control of controls) {
+    if (!control) continue;
+    let bx = control.x || 0;
+    let by = control.y || 0;
+    let bw = control.width || 0;
+    let bh = control.height || 0;
+    if (x >= bx && x <= bx + bw && y >= by && y <= by + bh) return true;
+  }
+
+  return false;
+}
+
 function mouseWheel(event) {
   if (!archiveCanPan()) return;
 
@@ -1253,6 +1729,7 @@ function mouseInsideDrawingArea() {
 }
 
 function pointInsideDrawingArea(x, y) {
+  if (!modalOpen) return false;
   drawLayout = getDrawingLayout();
   return (
     x >= drawLayout.drawX &&
