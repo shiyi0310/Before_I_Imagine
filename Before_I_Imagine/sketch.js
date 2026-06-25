@@ -107,6 +107,7 @@ let oldStorageKeys = [
 
 let archiveWallLayout = [];
 let layerLayout = [];
+let drawBackgroundApplesLayout = [];
 let layerReplayIndex = 0;
 let maxLayerUnits = 0;
 let stackBuffer = null;
@@ -309,22 +310,22 @@ function layoutInterface() {
     exportBtn.position(archiveNavX + (archiveNavW + archiveNavGap) * 5, 92);
 
   } else {
-    let y = drawLayout.toolbarY + 32;
-    let x = drawLayout.toolbarX + 38;
-    let gap = 12;
-    let btnW = min(100, max(82, (drawLayout.toolbarW - 480) / 7));
+    let y = drawLayout.toolbarY + 28;
+    let x = drawLayout.toolbarX + 18;
+    let gap = 8;
+    let btnW = 68;
 
-    colorPicker.position(x, y + 20);
-    colorPicker.size(70, 36);
-    sizeSlider.position(x + 118, y + 28);
-    sizeSlider.size(180);
+    colorPicker.position(x, y + 18);
+    colorPicker.size(58, 30);
+    sizeSlider.position(x + 96, y + 26);
+    sizeSlider.size(128);
 
-    let toolX = x + 300;
+    let toolX = x + 252;
     brushBtn.position(toolX, y);
     bucketBtn.position(toolX + (btnW + gap), y);
     eraserBtn.position(toolX + (btnW + gap) * 2, y);
 
-    let actionX = min(toolX + (btnW + gap) * 3 + 34, drawLayout.toolbarX + drawLayout.toolbarW - (btnW * 4 + gap * 3) - 36);
+    let actionX = toolX + (btnW + gap) * 3 + 10;
     clearBtn.position(actionX, y);
     submitBtn.position(actionX + (btnW + gap), y);
     nextPromptBtn.position(actionX + (btnW + gap) * 2, y);
@@ -361,6 +362,15 @@ function layoutInterface() {
     submitBtn.size(actionBtnW, 34);
     nextPromptBtn.size(actionBtnW, 34);
     archiveBtn.size(actionBtnW, 34);
+  } else {
+    let btnW = 68;
+    brushBtn.size(btnW, 52);
+    bucketBtn.size(btnW, 52);
+    eraserBtn.size(btnW, 52);
+    clearBtn.size(btnW, 52);
+    submitBtn.size(btnW, 52);
+    nextPromptBtn.size(btnW, 52);
+    archiveBtn.size(btnW, 52);
   }
   sizeArchiveButton(backBtn);
   sizeArchiveButton(gridBtn);
@@ -408,9 +418,10 @@ function applyCanvasTypography() {
 
 function sizeDrawingButton(btn) {
   let mobile = isMobileScreen();
-  btn.size(mobile ? 72 : 100, mobile ? 34 : 58);
-  btn.style("font-size", mobile ? "11px" : "14px");
-  btn.style("height", mobile ? "34px" : "58px");
+  btn.size(mobile ? 72 : 68, mobile ? 34 : 52);
+  btn.style("font-size", mobile ? "11px" : "12px");
+  btn.style("height", mobile ? "34px" : "52px");
+  btn.style("min-width", mobile ? "0" : "68px");
   btn.style("padding", mobile ? "2px 4px" : "6px 12px");
   btn.style("border", "1px solid #2b2926");
 }
@@ -508,32 +519,87 @@ function updateButtonVisibility() {
 
 function getDrawingLayout() {
   let mobile = isMobileScreen();
-  let margin = mobile ? 18 : 72;
-  let pageW = width - margin * 2;
-  let titleY = mobile ? 34 : 58;
-  let cardY = mobile ? 88 : 118;
-  let cardH = mobile ? 220 : 174;
-  let drawY = cardY + cardH + (mobile ? 22 : 22);
-  let toolbarH = mobile ? 142 : 110;
-  let footerH = mobile ? 34 : 54;
-  let toolbarY = height - toolbarH - footerH - (mobile ? 8 : 0);
-  let drawH = max(180, toolbarY - drawY - (mobile ? 18 : 22));
+  let sidebarW = mobile ? 0 : getDrawSidebarWidth();
+
+  if (mobile) {
+    let margin = 18;
+    let pageW = width - margin * 2;
+    let titleY = 34;
+    let cardY = 88;
+    let cardH = 220;
+    let drawY = cardY + cardH + 22;
+    let toolbarH = 142;
+    let footerH = 34;
+    let toolbarY = height - toolbarH - footerH - 8;
+    let drawH = max(180, toolbarY - drawY - 18);
+
+    return {
+      margin: margin,
+      pageW: pageW,
+      sidebarW: sidebarW,
+      titleY: titleY,
+      modalX: margin,
+      modalY: cardY - 18,
+      modalW: pageW,
+      modalH: toolbarY + toolbarH - cardY + 36,
+      cardX: margin,
+      cardY: cardY,
+      cardW: pageW,
+      cardH: cardH,
+      drawX: margin,
+      drawY: drawY,
+      drawW: pageW,
+      drawH: drawH,
+      toolbarX: margin,
+      toolbarY: toolbarY,
+      toolbarW: pageW,
+      toolbarH: toolbarH,
+      footerY: height - footerH,
+      footerH: footerH
+    };
+  }
+
+  let availableX = sidebarW;
+  let availableW = width - sidebarW;
+  let modalW = min(850, max(700, availableW - 160));
+  modalW = min(modalW, availableW - 72);
+  let modalPad = 18;
+  let cardH = 154;
+  let toolbarH = 96;
+  let gap = 18;
+  let desiredDrawH = constrain(height * 0.34, 250, 330);
+  let modalH = modalPad * 2 + cardH + gap + desiredDrawH + gap + toolbarH;
+  modalH = min(modalH, height - 120);
+  let drawH = max(220, modalH - modalPad * 2 - cardH - toolbarH - gap * 2);
+  let modalX = availableX + (availableW - modalW) / 2;
+  let modalY = max(78, (height - modalH) / 2);
+  let cardX = modalX + modalPad;
+  let cardY = modalY + modalPad;
+  let contentW = modalW - modalPad * 2;
+  let drawY = cardY + cardH + gap;
+  let toolbarY = drawY + drawH + gap;
+  let footerH = 42;
 
   return {
-    margin: margin,
-    pageW: pageW,
-    titleY: titleY,
-    cardX: margin,
+    margin: modalPad,
+    pageW: contentW,
+    sidebarW: sidebarW,
+    titleY: 0,
+    modalX: modalX,
+    modalY: modalY,
+    modalW: modalW,
+    modalH: modalH,
+    cardX: cardX,
     cardY: cardY,
-    cardW: pageW,
+    cardW: contentW,
     cardH: cardH,
-    drawX: margin,
+    drawX: cardX,
     drawY: drawY,
-    drawW: pageW,
+    drawW: contentW,
     drawH: drawH,
-    toolbarX: margin,
+    toolbarX: cardX,
     toolbarY: toolbarY,
-    toolbarW: pageW,
+    toolbarW: contentW,
     toolbarH: toolbarH,
     footerY: height - footerH,
     footerH: footerH
@@ -541,11 +607,18 @@ function getDrawingLayout() {
 }
 
 function drawDrawingPage() {
+  drawImmersiveDrawingPage();
+}
+
+function drawImmersiveDrawingPage() {
   drawLayout = getDrawingLayout();
   let p = prompts[promptIndex];
 
   drawPaperBackground();
-  drawDrawingTitle();
+  drawFloatingArchiveApples();
+  drawDrawPageSidebar();
+  drawDrawingModalShadow();
+  if (isMobileScreen()) drawDrawingTitle();
   drawPromptCard(p);
   drawDrawingSurface();
 
@@ -561,6 +634,229 @@ function drawPaperBackground() {
   noStroke();
   fill(bgCol);
   rect(0, 0, width, height);
+}
+
+function getDrawSidebarWidth() {
+  return constrain(width * 0.135, 190, 220);
+}
+
+function drawDrawingModalShadow() {
+  if (isMobileScreen()) return;
+
+  let x = drawLayout.modalX;
+  let y = drawLayout.modalY;
+  let w = drawLayout.modalW;
+  let h = drawLayout.modalH;
+
+  drawingContext.save();
+  drawingContext.shadowColor = "rgba(42, 35, 25, 0.16)";
+  drawingContext.shadowBlur = 34;
+  drawingContext.shadowOffsetY = 18;
+  noStroke();
+  fill(250, 247, 239, 226);
+  rect(x, y, w, h, 10);
+  drawingContext.restore();
+
+  noFill();
+  stroke(255, 255, 255, 125);
+  strokeWeight(1);
+  rect(x + 0.5, y + 0.5, w - 1, h - 1, 10);
+}
+
+function drawDrawPageSidebar() {
+  if (isMobileScreen()) return;
+
+  let w = getDrawSidebarWidth();
+
+  noStroke();
+  fill(251, 250, 246, 232);
+  rect(0, 0, w, height);
+
+  fill("#2470ff");
+  textAlign(LEFT);
+  textSize(14);
+  drawingContext.letterSpacing = "2px";
+  text("BEFORE I IMAGINE", 30, 42);
+  drawingContext.letterSpacing = "0px";
+
+  fill(mutedCol);
+  textSize(10);
+  text("A sensory drawing experiment", 30, 66);
+
+  fill(inkCol);
+  textSize(11);
+  text("•  ARCHIVE WALL", 30, 180);
+  textSize(42);
+  text(String(archive.length), 30, 238);
+  fill(mutedCol);
+  textSize(12);
+  text("Apples collected", 30, 266);
+
+  drawSidebarSparkline(30, 308, w - 60, 28);
+
+  fill(mutedCol);
+  textSize(11);
+  text("RECENT APPLES", 30, 426);
+  drawSidebarRecentApples(30, 462, w - 60);
+
+  stroke(226, 220, 210);
+  strokeWeight(1);
+  line(30, height - 292, w - 30, height - 292);
+
+  noStroke();
+  fill(inkCol);
+  textSize(11);
+  text("ABOUT", 30, height - 238);
+  fill(70);
+  textSize(11);
+  textLeading(19);
+  text("Draw from memory.\nNot from images.\nNot from search.\nJust what comes first.", 30, height - 206);
+
+  noFill();
+  stroke(210, 204, 194);
+  rect(30, height - 88, w - 60, 44, 2);
+  noStroke();
+  fill(74);
+  textSize(10);
+  text("ABOUT THE PROJECT  ›", 44, height - 61);
+}
+
+function drawSidebarSparkline(x, y, w, h) {
+  noFill();
+  stroke(198, 196, 190);
+  strokeWeight(1);
+  beginShape();
+  for (let i = 0; i < 28; i++) {
+    let px = x + map(i, 0, 27, 0, w);
+    let py = y + h * 0.62 + sin(i * 0.42) * 4 - map(i, 0, 27, 0, h * 0.55);
+    vertex(px, py);
+  }
+  endShape();
+
+  stroke("#2470ff");
+  beginShape();
+  for (let i = 17; i < 28; i++) {
+    let px = x + map(i, 0, 27, 0, w);
+    let py = y + h * 0.62 + sin(i * 0.42) * 4 - map(i, 0, 27, 0, h * 0.55);
+    vertex(px, py);
+  }
+  endShape();
+
+  noStroke();
+  fill("#2470ff");
+  circle(x + w, y + h * 0.08, 6);
+}
+
+function drawSidebarRecentApples(x, y, w) {
+  let recent = archive.slice(-5).reverse();
+  let rowH = 38;
+
+  for (let i = 0; i < 5; i++) {
+    let rowY = y + i * rowH;
+    if (recent[i]) {
+      push();
+      translate(x, rowY - 14);
+      drawStaticMini(recent[i], 28, 28);
+      pop();
+    } else {
+      noFill();
+      stroke(205, 199, 190);
+      circle(x + 14, rowY, 22);
+    }
+
+    noStroke();
+    fill(146);
+    textAlign(LEFT);
+    textSize(10);
+    text(recent[i] ? formatRelativeArchiveTime(recent[i], i) : "waiting", x + 44, rowY + 4);
+  }
+}
+
+function formatRelativeArchiveTime(d, index) {
+  if (!d || !d.createdAt) return `${index + 1} apple`;
+
+  let diffMinutes = floor((Date.now() - new Date(d.createdAt).getTime()) / 60000);
+  if (!Number.isFinite(diffMinutes) || diffMinutes < 0) return "just now";
+  if (diffMinutes < 1) return "just now";
+  if (diffMinutes < 60) return `${diffMinutes} min ago`;
+  return `${floor(diffMinutes / 60)} hr ago`;
+}
+
+function generateDrawBackgroundApplesLayout() {
+  drawBackgroundApplesLayout = [];
+  if (archive.length === 0) return;
+
+  let mobile = isMobileScreen();
+  let sidebarW = mobile ? 0 : getDrawSidebarWidth();
+  let count = min(archive.length, mobile ? 14 : 34);
+  let recent = archive.slice(-count);
+  let left = sidebarW + (mobile ? 18 : 34);
+  let right = width - (mobile ? 18 : 34);
+  let top = mobile ? 86 : 28;
+  let bottom = height - (mobile ? 190 : 40);
+
+  for (let i = 0; i < recent.length; i++) {
+    let colBias = i % 4;
+    let x;
+
+    if (!mobile && colBias === 0) {
+      x = random(left, max(left + 40, drawLayout.modalX - 64));
+    } else if (!mobile && colBias === 1) {
+      x = random(min(right - 40, drawLayout.modalX + drawLayout.modalW + 64), right);
+    } else {
+      x = random(left, right);
+    }
+
+    drawBackgroundApplesLayout.push({
+      archiveIndex: archive.indexOf(recent[i]),
+      x: x,
+      y: random(top, bottom),
+      size: random(mobile ? 34 : 42, mobile ? 58 : 76),
+      rotation: random(-0.18, 0.18),
+      phase: random(TWO_PI),
+      speed: random(0.00035, 0.00085),
+      drift: random(4, 12),
+      alpha: random(0.5, 0.82)
+    });
+  }
+}
+
+function drawFloatingArchiveApples() {
+  if (archive.length === 0) return;
+  if (drawBackgroundApplesLayout.length === 0) generateDrawBackgroundApplesLayout();
+
+  for (let item of drawBackgroundApplesLayout) {
+    let d = archive[item.archiveIndex];
+    if (!d) continue;
+
+    let t = millis() * item.speed + item.phase;
+    let floatX = sin(t * 0.8) * item.drift;
+    let floatY = cos(t) * item.drift;
+    let s = item.size;
+
+    push();
+    translate(item.x + floatX, item.y + floatY);
+    rotate(item.rotation + sin(t * 1.4) * 0.025);
+
+    drawingContext.save();
+    drawingContext.shadowColor = "rgba(50, 42, 32, 0.16)";
+    drawingContext.shadowBlur = 18;
+    drawingContext.shadowOffsetY = 14;
+    tint(255, 255 * item.alpha);
+    drawStaticMini(d, s, s);
+    noTint();
+    drawingContext.restore();
+
+    if (!isMobileScreen() && item.archiveIndex % 5 === 0) {
+      noStroke();
+      fill(120, 112, 104, 105);
+      textAlign(LEFT);
+      textSize(9);
+      text(`#${item.archiveIndex + 1}`, s * 0.52, s * 0.22);
+    }
+
+    pop();
+  }
 }
 
 function drawDrawingTitle() {
@@ -613,38 +909,41 @@ function drawPromptCard(p) {
     fill(mutedCol);
     textAlign(CENTER);
     textSize(13);
-    text(p.task, x + 110, y + 42);
+    let iconColW = min(210, w * 0.26);
+    let dividerX = x + iconColW;
+    let textX = dividerX + 34;
+    let textW = w - iconColW - 190;
+
+    text(p.task, x + iconColW / 2, y + 36);
 
     stroke(lineCol);
     strokeWeight(1);
-    line(x + 235, y + 24, x + 235, y + h - 24);
+    line(dividerX, y + 24, dividerX, y + h - 24);
 
     noStroke();
-    drawEyeIcon(x + 118, y + 88);
+    drawEyeIcon(x + iconColW / 2, y + 84);
 
     noStroke();
     textStyle(NORMAL);
     textAlign(LEFT);
 
-    let textX = x + 275;
-    let textW = w - 600;
     let baseY = y + 34;
 
     fill(inkCol);
-    textSize(15);
-    textLeading(20);
+    textSize(13);
+    textLeading(18);
     text(p.en, textX, baseY, textW, 44);
 
     fill(45);
-    textSize(12.5);
-    textLeading(18);
-    text(p.cn, textX, baseY + 48, textW, 30);
+    textSize(11.5);
+    textLeading(17);
+    text(p.cn, textX, baseY + 44, textW, 30);
 
     fill(105);
-    textSize(11);
-    textLeading(16);
-    text(p.noteEn, textX, baseY + 86, textW, 24);
-    text(p.noteCn, textX, baseY + 112, textW, 24);
+    textSize(10.5);
+    textLeading(15);
+    text(p.noteEn, textX, baseY + 82, textW, 24);
+    text(p.noteCn, textX, baseY + 106, textW, 24);
   }
 
   drawProgressDots(x + w - (mobile ? 96 : 150), y + (mobile ? 32 : 56));
@@ -719,13 +1018,13 @@ function drawToolbarPanel() {
   fill(inkCol);
   textAlign(LEFT);
   textSize(12);
-  text("Colour", x + 6, y + (isMobileScreen() ? 14 : 34));
-  text("Thickness", x + (isMobileScreen() ? 70 : 148), y + (isMobileScreen() ? 14 : 34));
+  text("Colour", x + (isMobileScreen() ? 6 : 18), y + (isMobileScreen() ? 14 : 24));
+  text("Thickness", x + (isMobileScreen() ? 70 : 96), y + (isMobileScreen() ? 14 : 24));
 
   if (!isMobileScreen()) {
     stroke(lineCol);
     strokeWeight(1);
-    line(x + 620, y + 26, x + 620, y + h - 26);
+    line(x + 480, y + 20, x + 480, y + h - 20);
   }
 }
 
@@ -738,8 +1037,9 @@ function drawDrawingFooter() {
     text("Draw above. Submit when finished.", width / 2, drawLayout.footerY + 12);
     text(`${archive.length} drawings saved   已保存 ${archive.length} 张`, width / 2, drawLayout.footerY + 26);
   } else {
-    text("Draw anywhere in the area above the prompt. Submit when finished.", width / 2, drawLayout.footerY + 20);
-    text(`请在提示区域上方的画布中作画。完成后提交。   |   ${archive.length} drawings saved   已保存 ${archive.length} 张`, width / 2, drawLayout.footerY + 42);
+    let cx = drawLayout.modalX + drawLayout.modalW / 2;
+    text("Draw anywhere in the area above the prompt. Submit when finished.", cx, drawLayout.footerY + 18);
+    text(`请在提示区域上方的画布中作画。完成后提交。   |   ${archive.length} drawings saved   已保存 ${archive.length} 张`, cx, drawLayout.footerY + 38);
   }
 }
 
@@ -1309,6 +1609,7 @@ function refreshArchiveViews() {
   generateArchiveWallLayout();
   calculateMaxLayerUnits();
   generateLayerLayout();
+  generateDrawBackgroundApplesLayout();
   if (page === "stack") selectFirstAvailableStackPrompt();
   markStackDirty();
 }
@@ -2716,5 +3017,6 @@ function windowResized() {
   generateArchiveWallLayout();
   calculateMaxLayerUnits();
   generateLayerLayout();
+  generateDrawBackgroundApplesLayout();
   markStackDirty();
 }
