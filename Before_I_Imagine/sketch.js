@@ -638,9 +638,13 @@ function drawImmersiveDrawingPage() {
 
   drawPaperBackground();
   if (!isMobileScreen()) {
-    drawFloatingArchiveApples();
     drawDrawPageSidebar();
     drawBackgroundViewSwitcher();
+    if (backgroundViewMode === "archive") {
+      drawMemoryArchiveView();
+    } else {
+      drawFloatingArchiveApples();
+    }
   } else if (mobileArchiveReady && !modalOpen) {
     drawFloatingArchiveApples();
   }
@@ -702,7 +706,7 @@ function drawDrawingModalShadow() {
 }
 
 function getBackgroundViewSwitcherRect() {
-  let w = isMobileScreen() ? 210 : 300;
+  let w = isMobileScreen() ? 210 : 420;
   let h = isMobileScreen() ? 40 : 52;
   let x = isMobileScreen() ? (width - w) / 2 : getDrawSidebarWidth() + (width - getDrawSidebarWidth() - w) / 2;
   let y = isMobileScreen() ? 20 : 28;
@@ -724,27 +728,46 @@ function drawBackgroundViewSwitcher() {
   rect(r.x, r.y, r.w, r.h, r.h / 2);
   drawingContext.restore();
 
-  noStroke();
-  fill(mutedCol);
-  textAlign(LEFT, CENTER);
-  textSize(11);
-  text("VIEW", r.x + 24, r.y + r.h / 2);
-
-  drawSwitcherOption("wall", "●  WALL", r.x + 118, r.y + r.h / 2);
-
-  stroke(156, 148, 137, 150);
-  strokeWeight(1);
-  line(r.x + 186, r.y + 15, r.x + 186, r.y + r.h - 15);
-
-  drawSwitcherOption("slice", "◌  SLICE", r.x + 218, r.y + r.h / 2);
+  let options = getTopToolbarOptions(r);
+  for (let i = 0; i < options.length; i++) {
+    drawSwitcherOption(options[i].mode, options[i].label, options[i].x, r.y + r.h / 2);
+    if (i < options.length - 1) {
+      stroke(156, 148, 137, 110);
+      strokeWeight(1);
+      let sepX = options[i].x + options[i].w + 10;
+      line(sepX, r.y + 15, sepX, r.y + r.h - 15);
+    }
+  }
 }
 
 function drawSwitcherOption(mode, label, x, y) {
+  let active = getTopToolbarActiveMode() === mode;
   noStroke();
-  fill(backgroundViewMode === mode ? inkCol : mutedCol);
+  fill(active ? inkCol : mutedCol);
   textAlign(LEFT, CENTER);
   textSize(11);
-  text(label, x, y);
+  text(`${active ? "●" : "○"}  ${label}`, x, y);
+}
+
+function getTopToolbarActiveMode() {
+  return modalOpen ? "draw" : backgroundViewMode;
+}
+
+function getTopToolbarOptions(r) {
+  let labels = [
+    { mode: "draw", label: "DRAW", w: 72 },
+    { mode: "archive", label: "ARCHIVE", w: 100 },
+    { mode: "wall", label: "WALL", w: 76 },
+    { mode: "slice", label: "SLICE", w: 76 }
+  ];
+  let x = r.x + 28;
+
+  for (let item of labels) {
+    item.x = x;
+    x += item.w + 22;
+  }
+
+  return labels;
 }
 
 function drawDrawingModalClose() {
@@ -818,7 +841,7 @@ function drawDrawPageSidebar() {
 
   fill(inkCol);
   textSize(11);
-  text("•  ARCHIVE WALL", 30, 132);
+  text("•  ARCHIVE", 30, 132);
   textSize(28);
   text(String(archive.length), 30, 176);
   fill(mutedCol);
@@ -1050,6 +1073,89 @@ function drawFloatingSliceCard(d, item) {
     noTint();
     pop();
   }
+}
+
+function drawMemoryArchiveView() {
+  let sidebarW = getDrawSidebarWidth();
+  let x0 = sidebarW + 58;
+  let y0 = 128;
+
+  noStroke();
+  fill(48);
+  textAlign(LEFT);
+  textSize(22);
+  drawingContext.letterSpacing = "4px";
+  text("ARCHIVE", x0, y0);
+  drawingContext.letterSpacing = "0px";
+
+  fill(98);
+  textSize(14);
+  text(`${archive.length} apples  ·  layered`, x0, y0 + 36);
+
+  if (archive.length === 0) {
+    fill(120);
+    textSize(14);
+    text("No apples collected yet.", x0, y0 + 92);
+    return;
+  }
+
+  let thumbSize = getBackgroundThumbSize();
+  let count = min(archive.length, 10);
+  let start = archive.length - count;
+  let baseX = sidebarW + max(180, (width - sidebarW) * 0.18);
+  let baseY = height * 0.43;
+  let cardW = min(180, max(126, (width - sidebarW) * 0.12));
+  let cardH = cardW * 1.28;
+  let stepX = min(124, max(78, (width - sidebarW - cardW - 160) / max(1, count - 1)));
+  let stepY = min(24, max(12, height * 0.018));
+
+  for (let i = 0; i < count; i++) {
+    let archiveIndex = start + i;
+    let d = archive[archiveIndex];
+    if (!d) continue;
+
+    let thumb = getCachedStaticMini(d, thumbSize, thumbSize);
+
+    let x = baseX + i * stepX;
+    let y = baseY - i * stepY;
+    let rot = map(i, 0, max(1, count - 1), -0.13, 0.08);
+
+    push();
+    translate(x, y);
+    rotate(rot);
+
+    drawingContext.save();
+    drawingContext.shadowColor = "rgba(48, 38, 26, 0.13)";
+    drawingContext.shadowBlur = 18;
+    drawingContext.shadowOffsetY = 20;
+    noStroke();
+    fill(250, 246, 236, 116);
+    rect(-cardW / 2, -cardH / 2, cardW, cardH, 3);
+    drawingContext.restore();
+
+    stroke(255, 255, 255, 100);
+    strokeWeight(1);
+    noFill();
+    rect(-cardW / 2 + 0.5, -cardH / 2 + 0.5, cardW - 1, cardH - 1, 3);
+
+    if (thumb) {
+      let imageSize = cardW * 0.72;
+      push();
+      translate(-imageSize / 2, -imageSize / 2 + cardH * 0.03);
+      tint(255, 166);
+      image(thumb, 0, 0, imageSize, imageSize);
+      noTint();
+      pop();
+    }
+
+    pop();
+  }
+
+  noStroke();
+  fill(108);
+  textAlign(CENTER);
+  textSize(12);
+  text("Scroll to move through\nSwipe to explore layers", sidebarW + (width - sidebarW) / 2, height - 86);
 }
 
 function drawSelectedApplePopup() {
@@ -1530,9 +1636,17 @@ function archiveCanPanAt(x, y) {
 function handleDrawPageClick(x, y) {
   let switchMode = getViewSwitcherHit(x, y);
   if (switchMode) {
-    if (backgroundViewMode !== switchMode) {
+    if (switchMode === "draw") {
+      modalOpen = true;
+      layoutInterface();
+    } else if (backgroundViewMode !== switchMode || modalOpen) {
       backgroundViewMode = switchMode;
-      generateDrawBackgroundApplesLayout();
+      modalOpen = false;
+      currentAction = null;
+      if (switchMode === "wall" || switchMode === "slice") {
+        generateDrawBackgroundApplesLayout();
+      }
+      layoutInterface();
     }
     return true;
   }
@@ -1574,8 +1688,12 @@ function getViewSwitcherHit(x, y) {
   let r = getBackgroundViewSwitcherRect();
   if (!pointInsideRect(x, y, r)) return null;
 
-  if (x < r.x + r.w * 0.62) return "wall";
-  return "slice";
+  let options = getTopToolbarOptions(r);
+  for (let item of options) {
+    if (x >= item.x - 8 && x <= item.x + item.w + 8) return item.mode;
+  }
+
+  return null;
 }
 
 function isClickOnModal(x, y) {
