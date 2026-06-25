@@ -115,6 +115,14 @@ let backgroundViewMode = "wall";
 let backgroundLayoutMode = "float";
 let selectedApple = null;
 let selectedAppleIndex = -1;
+let archiveTransition = 0;
+let archiveTargetTransition = 0;
+let archiveRowPan = [0, 0, 0, 0];
+let archiveRowDragging = false;
+let archiveRowDragIndex = -1;
+let archiveRowLastX = 0;
+let archiveRowPressPoint = { x: 0, y: 0 };
+let archiveRowDragDistance = 0;
 let layerReplayIndex = 0;
 let maxLayerUnits = 0;
 let stackBuffer = null;
@@ -178,6 +186,8 @@ function setup() {
 function draw() {
   background(bgCol);
   applyCanvasTypography();
+  archiveTargetTransition = (!modalOpen && backgroundViewMode === "archive") ? 1 : 0;
+  archiveTransition = lerp(archiveTransition, archiveTargetTransition, 0.06);
 
   if (page === "draw") {
     drawDrawingPage();
@@ -653,6 +663,7 @@ function drawImmersiveDrawingPage() {
     drawBackgroundViewSwitcher();
     if (backgroundViewMode === "archive") {
       drawMemoryArchiveView();
+      drawFloatingArchiveApples();
     } else {
       drawFloatingArchiveApples();
     }
@@ -675,6 +686,10 @@ function drawImmersiveDrawingPage() {
     drawDrawingFooter();
   } else {
     drawReopenDrawingButton();
+  }
+
+  if (!modalOpen && backgroundViewMode === "archive") {
+    drawSelectedApplePopup();
   }
 
 }
@@ -968,6 +983,13 @@ function generateDrawBackgroundApplesLayout() {
   let bottom = height - (mobile ? 190 : 40);
   let cardW = mobile ? 62 : 86;
   let cardH = mobile ? 62 : 86;
+  let archiveCardW = mobile ? 88 : 122;
+  let archiveCardH = mobile ? 124 : 166;
+  let archiveStartX = sidebarW + (mobile ? 56 : 190);
+  let archiveTop = getArchiveRowsTop();
+  let archiveRowGap = getArchiveRowGap();
+  let archiveStepX = mobile ? 58 : 74;
+  let rowSeen = [0, 0, 0, 0];
 
   if (backgroundViewMode === "slice") {
     cardW = mobile ? 88 : 128;
@@ -986,14 +1008,33 @@ function generateDrawBackgroundApplesLayout() {
       x = random(left, right);
     }
 
+    let scatterY = random(top, bottom);
+    let scatterRotation = random(-0.18, 0.18);
+    let d = recent[i];
+    let rowIndex = getDrawingPromptIndex(d);
+    if (rowIndex === null || rowIndex < 0 || rowIndex > 3) rowIndex = 0;
+    let rowCol = rowSeen[rowIndex]++;
+    let archiveRotation = radians(((rowCol % 5) - 2) * 1.8);
+
     drawBackgroundApplesLayout.push({
       archiveIndex: archiveStartIndex + i,
       x: x,
-      y: random(top, bottom),
+      y: scatterY,
+      scatterX: x,
+      scatterY: scatterY,
+      scatterRotation: scatterRotation,
+      archiveX: archiveStartX + rowCol * archiveStepX,
+      archiveY: archiveTop + rowIndex * archiveRowGap,
+      archiveRotation: archiveRotation,
+      archiveW: archiveCardW,
+      archiveH: archiveCardH,
+      rowIndex: rowIndex,
+      rowLabel: getArchiveRowLabel(rowIndex),
+      lift: 0,
       cardW: cardW,
       cardH: cardH,
       size: random(mobile ? 34 : 42, mobile ? 58 : 76),
-      rotation: random(-0.18, 0.18),
+      rotation: scatterRotation,
       phase: random(TWO_PI),
       speed: random(0.00035, 0.00085),
       drift: random(4, 12),
@@ -1029,21 +1070,36 @@ function drawFloatingArchiveApples() {
       }
     }
 
+    let isArchiveMode = backgroundViewMode === "archive";
     let t = millis() * item.speed + item.phase;
     let floatX = mobile ? sin(t * 0.6) * item.drift * 0.35 : sin(t * 0.8) * item.drift;
     let floatY = mobile ? cos(t * 0.6) * item.drift * 0.35 : cos(t) * item.drift;
+    let scatterX = item.scatterX + (isArchiveMode ? 0 : floatX);
+    let scatterY = item.scatterY + (isArchiveMode ? 0 : floatY);
+    let rowPan = archiveRowPan[item.rowIndex] || 0;
+    let archiveX = item.archiveX + rowPan;
+    let archiveY = item.archiveY;
+    let drawX = lerp(scatterX, archiveX, archiveTransition);
+    let drawY = lerp(scatterY, archiveY, archiveTransition);
+    let drawRotation = lerp(item.scatterRotation, item.archiveRotation, archiveTransition);
+    let drawSize = lerp(item.size, item.archiveW, archiveTransition);
+    let cardH = lerp(item.size, item.archiveH, archiveTransition);
+    let hovered = isArchiveMode && archiveCardHitTest(mouseX, mouseY, item, drawX, drawY, drawSize, cardH);
+    item.lift = lerp(item.lift || 0, hovered ? -22 : 0, 0.16);
 
     push();
-    translate(item.x + floatX, item.y + floatY);
-    rotate(item.rotation + (mobile ? 0 : sin(t * 1.4) * 0.025));
+    translate(drawX, drawY + item.lift);
+    rotate(drawRotation + (mobile || isArchiveMode ? 0 : sin(t * 1.4) * 0.025));
 
-    if (backgroundViewMode === "slice") {
+    if (isArchiveMode) {
+      drawArchiveTarotCard(d, item, drawSize, cardH, hovered);
+    } else if (backgroundViewMode === "slice") {
       drawFloatingSliceCard(d, item);
     } else {
       drawFloatingWallCard(d, item);
     }
 
-    if (!isMobileScreen() && item.archiveIndex % 5 === 0) {
+    if (!isMobileScreen() && !isArchiveMode && item.archiveIndex % 5 === 0) {
       noStroke();
       fill(120, 112, 104, 105);
       textAlign(LEFT);
@@ -1098,6 +1154,80 @@ function drawFloatingSliceCard(d, item) {
   }
 }
 
+function drawArchiveTarotCard(d, item, cardW, cardH, hovered) {
+  drawingContext.save();
+  drawingContext.shadowColor = hovered ? "rgba(46, 36, 24, 0.2)" : "rgba(46, 36, 24, 0.11)";
+  drawingContext.shadowBlur = hovered ? 24 : 14;
+  drawingContext.shadowOffsetY = hovered ? 16 : 10;
+  noStroke();
+  fill(252, 248, 238, hovered ? 220 : 186);
+  rect(-cardW / 2, -cardH / 2, cardW, cardH, 7);
+  drawingContext.restore();
+
+  stroke(226, 216, 202, hovered ? 220 : 150);
+  strokeWeight(1);
+  noFill();
+  rect(-cardW / 2 + 0.5, -cardH / 2 + 0.5, cardW - 1, cardH - 1, 7);
+
+  if (item.cachedThumb) {
+    let imageSize = cardW * 0.76;
+    push();
+    translate(-imageSize / 2, -imageSize / 2 - cardH * 0.04);
+    tint(255, hovered ? 245 : 210);
+    image(item.cachedThumb, 0, 0, imageSize, imageSize);
+    noTint();
+    pop();
+  }
+
+  noStroke();
+  fill(80, 73, 66, hovered ? 170 : 122);
+  textAlign(CENTER);
+  textSize(8.5);
+  text(`#${item.archiveIndex + 1}`, 0, cardH / 2 - 20);
+}
+
+function archiveCardHitTest(px, py, item, cx, cy, cardW, cardH) {
+  let dx = px - cx;
+  let dy = py - (cy + (item.lift || 0));
+  return abs(dx) <= cardW / 2 && abs(dy) <= cardH / 2;
+}
+
+function getArchiveModeCardAt(px, py) {
+  if (backgroundViewMode !== "archive") return -1;
+
+  for (let i = drawBackgroundApplesLayout.length - 1; i >= 0; i--) {
+    let item = drawBackgroundApplesLayout[i];
+    let rowPan = archiveRowPan[item.rowIndex] || 0;
+    let x = lerp(item.scatterX, item.archiveX + rowPan, archiveTransition);
+    let y = lerp(item.scatterY, item.archiveY, archiveTransition);
+    let w = lerp(item.size, item.archiveW, archiveTransition);
+    let h = lerp(item.size, item.archiveH, archiveTransition);
+    if (archiveCardHitTest(px, py, item, x, y, w, h)) {
+      return item.archiveIndex;
+    }
+  }
+
+  return -1;
+}
+
+function getArchiveRowLabel(rowIndex) {
+  let labels = [
+    "TASK 01 / DEFAULT",
+    "TASK 02 / TOUCH MEMORY",
+    "TASK 03 / TASTE MEMORY",
+    "TASK 04 / IMPERFECT MEMORY"
+  ];
+  return labels[rowIndex] || labels[0];
+}
+
+function getArchiveRowsTop() {
+  return isMobileScreen() ? 126 : 216;
+}
+
+function getArchiveRowGap() {
+  return isMobileScreen() ? 118 : 132;
+}
+
 function drawMemoryArchiveView() {
   let sidebarW = getDrawSidebarWidth();
   let x0 = sidebarW + 58;
@@ -1113,7 +1243,7 @@ function drawMemoryArchiveView() {
 
   fill(98);
   textSize(14);
-  text(`${archive.length} apples  ·  layered`, x0, y0 + 36);
+  text(`${archive.length} apples  ·  sorted by prompt`, x0, y0 + 36);
 
   if (archive.length === 0) {
     fill(120);
@@ -1122,68 +1252,24 @@ function drawMemoryArchiveView() {
     return;
   }
 
-  let thumbSize = getBackgroundThumbSize();
-  let count = min(archive.length, 10);
-  let start = archive.length - count;
-  let baseX = sidebarW + max(180, (width - sidebarW) * 0.18);
-  let baseY = height * 0.43;
-  let cardW = min(180, max(126, (width - sidebarW) * 0.12));
-  let cardH = cardW * 1.28;
-  let stepX = min(124, max(78, (width - sidebarW - cardW - 160) / max(1, count - 1)));
-  let stepY = min(24, max(12, height * 0.018));
-
-  push();
-  translate(archiveSlicePanX, 0);
-
-  for (let i = 0; i < count; i++) {
-    let archiveIndex = start + i;
-    let d = archive[archiveIndex];
-    if (!d) continue;
-
-    let thumb = getCachedStaticMini(d, thumbSize, thumbSize);
-
-    let x = baseX + i * stepX;
-    let y = baseY - i * stepY;
-    let rot = map(i, 0, max(1, count - 1), -0.13, 0.08);
-
-    push();
-    translate(x, y);
-    rotate(rot);
-
-    drawingContext.save();
-    drawingContext.shadowColor = "rgba(48, 38, 26, 0.13)";
-    drawingContext.shadowBlur = 18;
-    drawingContext.shadowOffsetY = 20;
+  let rowY = getArchiveRowsTop();
+  for (let i = 0; i < 4; i++) {
     noStroke();
-    fill(250, 246, 236, 116);
-    rect(-cardW / 2, -cardH / 2, cardW, cardH, 3);
-    drawingContext.restore();
+    fill(86, 78, 70, 150);
+    textAlign(LEFT);
+    textSize(11);
+    text(getArchiveRowLabel(i), x0, rowY + i * getArchiveRowGap() + 4);
 
-    stroke(255, 255, 255, 100);
+    stroke(214, 205, 193, 115);
     strokeWeight(1);
-    noFill();
-    rect(-cardW / 2 + 0.5, -cardH / 2 + 0.5, cardW - 1, cardH - 1, 3);
-
-    if (thumb) {
-      let imageSize = cardW * 0.72;
-      push();
-      translate(-imageSize / 2, -imageSize / 2 + cardH * 0.03);
-      tint(255, 166);
-      image(thumb, 0, 0, imageSize, imageSize);
-      noTint();
-      pop();
-    }
-
-    pop();
+    line(x0, rowY + i * getArchiveRowGap() + 18, width - 50, rowY + i * getArchiveRowGap() + 18);
   }
-
-  pop();
 
   noStroke();
   fill(108);
   textAlign(CENTER);
   textSize(12);
-  text("Scroll to move through\nSwipe to explore layers", sidebarW + (width - sidebarW) / 2, height - 86);
+  text("Drag each row to browse the tarot spread", sidebarW + (width - sidebarW) / 2, height - 56);
 }
 
 function drawSelectedApplePopup() {
@@ -1215,8 +1301,8 @@ function drawSelectedApplePopup() {
   textSize(10);
   text(formatArchiveTime(selectedApple), r.x + 22, r.y + 50);
 
-  let duration = selectedApple.durationSeconds !== undefined ? `${selectedApple.durationSeconds}s` : "";
-  text(duration, r.x + 22, r.y + 66);
+  let duration = selectedApple.durationSeconds !== undefined ? `${selectedApple.durationSeconds}s` : "undated";
+  text(`${duration} · ${countDrawingUnits(selectedApple)} trace units`, r.x + 22, r.y + 66);
 
   stroke(inkCol);
   strokeWeight(1.2);
@@ -1542,7 +1628,7 @@ function touchMoved() {
       return true;
     }
 
-    if (archiveSliceDragging || isWallPanning || isArchivePanning || (page === "draw" && pointInsideDrawingArea(x, y))) {
+    if (archiveSliceDragging || archiveRowDragging || isWallPanning || isArchivePanning || (page === "draw" && pointInsideDrawingArea(x, y))) {
       handlePointerDragged(x, y);
       return false;
     }
@@ -1566,6 +1652,16 @@ function handlePointerPressed(x, y) {
   }
 
   if (page === "draw" && handleDrawPageClick(x, y)) {
+    return true;
+  }
+
+  let archiveRow = getArchiveRowAt(x, y);
+  if (archiveRow >= 0) {
+    archiveRowDragging = true;
+    archiveRowDragIndex = archiveRow;
+    archiveRowLastX = x;
+    archiveRowPressPoint = { x: x, y: y };
+    archiveRowDragDistance = 0;
     return true;
   }
 
@@ -1619,6 +1715,15 @@ function handlePointerDragged(x, y) {
     return false;
   }
 
+  if (archiveRowDragging) {
+    let dx = x - archiveRowLastX;
+    archiveRowPan[archiveRowDragIndex] = (archiveRowPan[archiveRowDragIndex] || 0) + dx;
+    archiveRowLastX = x;
+    archiveRowDragDistance += abs(dx);
+    constrainArchiveRowPan(archiveRowDragIndex);
+    return false;
+  }
+
   if (isWallPanning && page === "archiveWall") {
     let dx = x - lastWallPanPoint.x;
     let dy = y - lastWallPanPoint.y;
@@ -1664,6 +1769,18 @@ function handlePointerDragged(x, y) {
 function handlePointerReleased() {
   if (archiveSliceDragging) {
     archiveSliceDragging = false;
+  }
+
+  if (archiveRowDragging) {
+    if (archiveRowDragDistance < 8) {
+      let hitIndex = getArchiveModeCardAt(archiveRowPressPoint.x, archiveRowPressPoint.y);
+      if (hitIndex >= 0) {
+        selectedAppleIndex = hitIndex;
+        selectedApple = archive[hitIndex] || null;
+      }
+    }
+    archiveRowDragging = false;
+    archiveRowDragIndex = -1;
   }
 
   if (isWallPanning) {
@@ -1750,6 +1867,16 @@ function pointInsideArchiveWallPopupClose(x, y) {
 }
 
 function handleDrawPageClick(x, y) {
+  if (backgroundViewMode === "archive" && isClickOnApplePopupClose(x, y)) {
+    selectedApple = null;
+    selectedAppleIndex = -1;
+    return true;
+  }
+
+  if (backgroundViewMode === "archive" && isClickOnApplePopup(x, y)) {
+    return true;
+  }
+
   let switchMode = getViewSwitcherHit(x, y);
   if (switchMode) {
     if (switchMode === "draw") {
@@ -1792,7 +1919,7 @@ function isArchiveSliceMode() {
   return (
     page === "draw" &&
     !modalOpen &&
-    (backgroundViewMode === "archive" || backgroundViewMode === "slice")
+    backgroundViewMode === "slice"
   );
 }
 
@@ -1803,6 +1930,25 @@ function canPanArchiveSliceAt(x, y) {
     !isClickOnViewSwitcher(x, y) &&
     !isClickOnReopenDrawingButton(x, y)
   );
+}
+
+function getArchiveRowAt(x, y) {
+  if (page !== "draw" || modalOpen || backgroundViewMode !== "archive") return -1;
+  if (isClickOnSidebar(x, y) || isClickOnViewSwitcher(x, y) || isClickOnReopenDrawingButton(x, y)) return -1;
+
+  let top = getArchiveRowsTop();
+  let gap = getArchiveRowGap();
+  for (let i = 0; i < 4; i++) {
+    let rowY = top + i * gap;
+    if (y >= rowY - 64 && y <= rowY + 72) return i;
+  }
+  return -1;
+}
+
+function constrainArchiveRowPan(rowIndex) {
+  let rowCount = drawBackgroundApplesLayout.filter(item => item.rowIndex === rowIndex).length;
+  let maxLeft = -max(0, rowCount * 74 - (width - getDrawSidebarWidth() - 210));
+  archiveRowPan[rowIndex] = constrain(archiveRowPan[rowIndex] || 0, maxLeft - 34, 80);
 }
 
 function constrainArchiveSlicePan() {
