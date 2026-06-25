@@ -2480,7 +2480,14 @@ function createDrawingPreviewDataURL(drawingData, previewW, previewH) {
     dataURL = g.canvas.toDataURL("image/png");
   }
 
-  g.remove();
+  try {
+    if (g && g.canvas && g.canvas.parentNode) {
+      g.canvas.parentNode.removeChild(g.canvas);
+    }
+  } catch (error) {
+    console.warn("Could not remove preview graphics canvas:", error);
+  }
+
   return dataURL;
 }
 
