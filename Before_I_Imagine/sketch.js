@@ -124,6 +124,9 @@ let stackDirty = true;
 let stackRenderedCount = 0;
 let gridMiniCache = {};
 let archivePan = { x: 0, y: 0 };
+let archiveSlicePanX = 0;
+let archiveSliceDragging = false;
+let archiveSliceLastX = 0;
 let isArchivePanning = false;
 let lastPanPoint = { x: 0, y: 0 };
 
@@ -1000,6 +1003,11 @@ function drawFloatingArchiveApples() {
   let mobile = isMobileScreen();
   let thumbSize = getBackgroundThumbSize();
 
+  if (backgroundViewMode === "slice") {
+    push();
+    translate(archiveSlicePanX, 0);
+  }
+
   for (let item of drawBackgroundApplesLayout) {
     let d = archive[item.archiveIndex];
     if (!d) continue;
@@ -1036,6 +1044,10 @@ function drawFloatingArchiveApples() {
       }
     }
 
+    pop();
+  }
+
+  if (backgroundViewMode === "slice") {
     pop();
   }
 }
@@ -1109,6 +1121,9 @@ function drawMemoryArchiveView() {
   let stepX = min(124, max(78, (width - sidebarW - cardW - 160) / max(1, count - 1)));
   let stepY = min(24, max(12, height * 0.018));
 
+  push();
+  translate(archiveSlicePanX, 0);
+
   for (let i = 0; i < count; i++) {
     let archiveIndex = start + i;
     let d = archive[archiveIndex];
@@ -1150,6 +1165,8 @@ function drawMemoryArchiveView() {
 
     pop();
   }
+
+  pop();
 
   noStroke();
   fill(108);
@@ -1514,7 +1531,7 @@ function touchMoved() {
       return true;
     }
 
-    if (isArchivePanning || (page === "draw" && pointInsideDrawingArea(x, y))) {
+    if (archiveSliceDragging || isArchivePanning || (page === "draw" && pointInsideDrawingArea(x, y))) {
       handlePointerDragged(x, y);
       return false;
     }
@@ -1534,6 +1551,12 @@ function handlePointerPressed(x, y) {
   }
 
   if (page === "draw" && handleDrawPageClick(x, y)) {
+    return true;
+  }
+
+  if (canPanArchiveSliceAt(x, y)) {
+    archiveSliceDragging = true;
+    archiveSliceLastX = x;
     return true;
   }
 
@@ -1574,6 +1597,13 @@ function handlePointerDragged(x, y) {
     return false;
   }
 
+  if (archiveSliceDragging) {
+    archiveSlicePanX += x - archiveSliceLastX;
+    archiveSliceLastX = x;
+    constrainArchiveSlicePan();
+    return false;
+  }
+
   if (isArchivePanning && archiveCanPanAt(x, y)) {
     let dx = x - lastPanPoint.x;
     let dy = y - lastPanPoint.y;
@@ -1606,6 +1636,10 @@ function handlePointerDragged(x, y) {
 }
 
 function handlePointerReleased() {
+  if (archiveSliceDragging) {
+    archiveSliceDragging = false;
+  }
+
   if (isArchivePanning) {
     isArchivePanning = false;
   }
@@ -1670,6 +1704,35 @@ function handleDrawPageClick(x, y) {
   }
 
   return false;
+}
+
+function isArchiveSliceMode() {
+  return (
+    page === "draw" &&
+    !modalOpen &&
+    (backgroundViewMode === "archive" || backgroundViewMode === "slice")
+  );
+}
+
+function canPanArchiveSliceAt(x, y) {
+  return (
+    isArchiveSliceMode() &&
+    !isClickOnSidebar(x, y) &&
+    !isClickOnViewSwitcher(x, y) &&
+    !isClickOnReopenDrawingButton(x, y)
+  );
+}
+
+function constrainArchiveSlicePan() {
+  let sidebarW = isMobileScreen() ? 0 : getDrawSidebarWidth();
+  let count = backgroundViewMode === "archive"
+    ? min(archive.length, 10)
+    : drawBackgroundApplesLayout.length;
+  let contentW = max(width, count * (backgroundViewMode === "archive" ? 112 : 92));
+  let minX = min(0, width - sidebarW - contentW - 80);
+  let maxX = max(80, (width - sidebarW) * 0.2);
+
+  archiveSlicePanX = constrain(archiveSlicePanX, minX, maxX);
 }
 
 let lastBackgroundToggleTime = 0;
@@ -1751,6 +1814,12 @@ function isClickOnDrawingDomControl(x, y) {
 }
 
 function mouseWheel(event) {
+  if (isArchiveSliceMode()) {
+    archiveSlicePanX -= event.delta;
+    constrainArchiveSlicePan();
+    return false;
+  }
+
   if (!archiveCanPan()) return;
 
   if (page === "layer") {
