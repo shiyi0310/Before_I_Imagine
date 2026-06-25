@@ -108,6 +108,8 @@ let oldStorageKeys = [
 let archiveWallLayout = [];
 let layerLayout = [];
 let drawBackgroundApplesLayout = [];
+const BG_THUMB_SIZE = 96;
+const maxThumbCacheBuildsPerFrame = 4;
 let modalOpen = true;
 let backgroundViewMode = "wall";
 let backgroundLayoutMode = "float";
@@ -961,12 +963,16 @@ function drawFloatingArchiveApples() {
   if (archive.length === 0) return;
   if (drawBackgroundApplesLayout.length === 0) generateDrawBackgroundApplesLayout();
 
+  let thumbCacheBuildsThisFrame = 0;
+
   for (let item of drawBackgroundApplesLayout) {
     let d = archive[item.archiveIndex];
     if (!d) continue;
-    if (!item.cachedThumb || item.cachedThumbSize !== floor(item.size)) {
-      item.cachedThumbSize = floor(item.size);
-      item.cachedThumb = getCachedStaticMini(d, item.cachedThumbSize, item.cachedThumbSize);
+    if (!item.cachedThumb) {
+      if (thumbCacheBuildsThisFrame < maxThumbCacheBuildsPerFrame) {
+        item.cachedThumb = getCachedStaticMini(d, BG_THUMB_SIZE, BG_THUMB_SIZE);
+        thumbCacheBuildsThisFrame++;
+      }
     }
 
     let t = millis() * item.speed + item.phase;
@@ -1000,16 +1006,12 @@ function drawFloatingArchiveApples() {
 }
 
 function drawFloatingWallCard(d, item) {
+  if (!item.cachedThumb) return;
+
   push();
   translate(-item.size / 2, -item.size / 2);
   tint(255, 255 * min(0.92, item.alpha + 0.12));
-
-  if (item.cachedThumb) {
-    image(item.cachedThumb, 0, 0, item.size, item.size);
-  } else {
-    drawStaticMini(d, item.size, item.size);
-  }
-
+  image(item.cachedThumb, 0, 0, item.size, item.size);
   noTint();
   pop();
 }
