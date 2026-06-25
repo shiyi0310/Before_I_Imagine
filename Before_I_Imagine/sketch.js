@@ -123,6 +123,7 @@ let stackCountMode = 30;
 let stackDirty = true;
 let stackRenderedCount = 0;
 let gridMiniCache = {};
+let previewImageCache = {};
 let archivePan = { x: 0, y: 0 };
 let archiveSlicePanX = 0;
 let archiveSliceDragging = false;
@@ -1012,7 +1013,10 @@ function drawFloatingArchiveApples() {
     let d = archive[item.archiveIndex];
     if (!d) continue;
     if (!item.cachedThumb) {
-      if (thumbCacheBuildsThisFrame < maxThumbCacheBuildsPerFrame) {
+      let preview = getPreviewImage(d);
+      if (preview) {
+        item.cachedThumb = preview;
+      } else if (!hasPreviewData(d) && thumbCacheBuildsThisFrame < maxThumbCacheBuildsPerFrame) {
         item.cachedThumb = getCachedStaticMini(d, thumbSize, thumbSize);
         thumbCacheBuildsThisFrame++;
       }
@@ -2086,6 +2090,7 @@ function saveCurrentDrawing() {
     durationSeconds: Number(duration.toFixed(2)),
     actions: JSON.parse(JSON.stringify(actions))
   };
+  drawingData.preview = createDrawingPreviewDataURL(drawingData, 260, 210);
 
   archive.push(drawingData);
   saveArchive();
@@ -2216,10 +2221,121 @@ async function saveDrawingToCloud(drawingData) {
     if (!response.ok) {
       throw new Error(await response.text());
     }
+
+    let saved = await response.json();
+    if (saved && saved.dbId) {
+      drawingData.dbId = saved.dbId;
+      saveArchive();
+    }
   } catch (error) {
     console.warn("Could not save drawing to server. It is still saved locally:", error);
   }
 }
+
+function createDrawingPreviewDataURL(drawingData, previewW, previewH) {
+  let g = createGraphics(previewW, previewH);
+  g.pixelDensity(1);
+  g.clear();
+  g.smooth();
+  renderDrawingToGraphics(g, drawingData, 999999, true, 1);
+
+  let dataURL = "";
+  try {
+    dataURL = g.canvas.toDataURL("image/webp", 0.72);
+  } catch (error) {
+    dataURL = "";
+  }
+
+  if (!dataURL || !dataURL.startsWith("data:image/webp")) {
+    dataURL = g.canvas.toDataURL("image/png");
+  }
+
+  g.remove();
+  return dataURL;
+}
+
+function hasPreviewData(d) {
+  return Boolean(d && typeof d.preview === "string" && d.preview.startsWith("data:image/"));
+}
+
+function getPreviewImage(d) {
+  if (!hasPreviewData(d)) return null;
+
+  let key = d.dbId || d.id || d.createdAt || archive.indexOf(d);
+  let cached = previewImageCache[key];
+
+  if (cached) {
+    return cached.loaded ? cached.img : null;
+  }
+
+  let entry = {
+    img: null,
+    loaded: false,
+    failed: false
+  };
+  previewImageCache[key] = entry;
+
+  entry.img = loadImage(
+    d.preview,
+    (img) => {
+      entry.img = img;
+      entry.loaded = true;
+    },
+    () => {
+      entry.failed = true;
+    }
+  );
+
+  return null;
+}
+
+async function backfillMissingPreviews() {
+  let updated = 0;
+  let skipped = 0;
+
+  for (let drawing of archive) {
+    if (!drawing || hasPreviewData(drawing)) {
+      skipped++;
+      continue;
+    }
+
+    if (!drawing.dbId) {
+      console.warn("Skipping drawing without dbId:", drawing.id || drawing.createdAt);
+      skipped++;
+      continue;
+    }
+
+    let preview = createDrawingPreviewDataURL(drawing, 260, 210);
+
+    try {
+      let response = await fetch(`/api/drawings/${drawing.dbId}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ preview })
+      });
+
+      if (!response.ok) {
+        throw new Error(await response.text());
+      }
+
+      drawing.preview = preview;
+      updated++;
+    } catch (error) {
+      console.warn("Could not backfill preview:", drawing.dbId, error);
+      skipped++;
+    }
+  }
+
+  saveArchive();
+  clearGridMiniCache();
+  generateDrawBackgroundApplesLayout();
+  console.log(`Preview backfill complete. Updated ${updated}, skipped ${skipped}.`);
+  return { updated, skipped };
+}
+
+window.backfillMissingPreviews = backfillMissingPreviews;
 
 function refreshArchiveViews() {
   clearGridMiniCache();
@@ -3072,6 +3188,12 @@ function drawReplayMini(d, limit, miniW, miniH, alphaValue) {
 }
 
 function drawStaticMini(d, miniW, miniH) {
+  let preview = getPreviewImage(d);
+  if (preview) {
+    image(preview, 0, 0, miniW, miniH);
+    return;
+  }
+
   let g = getCachedStaticMini(d, miniW, miniH);
   image(g, 0, 0);
 }

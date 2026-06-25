@@ -25,6 +25,18 @@ app.get("/api/test", (req, res) => {
   });
 });
 
+function attachDatabaseFields(row) {
+  const drawing = row && row.drawing && typeof row.drawing === "object"
+    ? row.drawing
+    : {};
+
+  return {
+    ...drawing,
+    dbId: row.id,
+    dbCreatedAt: row.created_at
+  };
+}
+
 app.get("/api/drawings", async (req, res) => {
   if (!supabase) {
     return res.status(500).json({
@@ -41,7 +53,7 @@ app.get("/api/drawings", async (req, res) => {
     return res.status(500).json({ error: error.message });
   }
 
-  return res.json(data.map((row) => row.drawing));
+  return res.json(data.map(attachDatabaseFields));
 });
 
 app.post("/api/drawings", async (req, res) => {
@@ -67,7 +79,52 @@ app.post("/api/drawings", async (req, res) => {
     return res.status(500).json({ error: error.message });
   }
 
-  return res.status(201).json(data);
+  return res.status(201).json(attachDatabaseFields(data));
+});
+
+app.patch("/api/drawings/:id", async (req, res) => {
+  if (!supabase) {
+    return res.status(500).json({
+      error: "Supabase is not configured. Add SUPABASE_URL and SUPABASE_SERVICE_KEY in Render Environment."
+    });
+  }
+
+  const { preview } = req.body || {};
+
+  if (typeof preview !== "string" || !preview.startsWith("data:image/")) {
+    return res.status(400).json({ error: "Invalid preview data." });
+  }
+
+  const { data: existing, error: selectError } = await supabase
+    .from("drawings")
+    .select("id, created_at, drawing")
+    .eq("id", req.params.id)
+    .single();
+
+  if (selectError) {
+    return res.status(500).json({ error: selectError.message });
+  }
+
+  const drawing = existing && existing.drawing && typeof existing.drawing === "object"
+    ? existing.drawing
+    : {};
+  const updatedDrawing = {
+    ...drawing,
+    preview
+  };
+
+  const { data, error } = await supabase
+    .from("drawings")
+    .update({ drawing: updatedDrawing })
+    .eq("id", req.params.id)
+    .select("id, created_at, drawing")
+    .single();
+
+  if (error) {
+    return res.status(500).json({ error: error.message });
+  }
+
+  return res.json(attachDatabaseFields(data));
 });
 
 app.listen(PORT, () => {
