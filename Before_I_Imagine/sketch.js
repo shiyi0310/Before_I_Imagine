@@ -139,7 +139,7 @@ function setup() {
   document.body.style.fontFamily = interfaceFont;
   document.body.style.fontWeight = "400";
 
-  pd = min(displayDensity(), 2);
+  pd = isMobileScreen() ? 1 : min(displayDensity(), 2);
   pixelDensity(pd);
 
   createCanvas(windowWidth, windowHeight);
@@ -288,7 +288,7 @@ function layoutInterface() {
     let gap = 6;
     let innerW = drawLayout.toolbarW - 32;
     let toolBtnW = (innerW - gap * 2) / 3;
-    let actionBtnW = (innerW - gap * 3) / 4;
+    let actionBtnW = (innerW - gap * 2) / 3;
 
     colorPicker.position(x, y + 22);
     colorPicker.size(48, 28);
@@ -302,7 +302,7 @@ function layoutInterface() {
     clearBtn.position(x, y + 96);
     submitBtn.position(x + (actionBtnW + gap), y + 96);
     nextPromptBtn.position(x + (actionBtnW + gap) * 2, y + 96);
-    archiveBtn.position(x + (actionBtnW + gap) * 3, y + 96);
+    archiveBtn.position(-9999, -9999);
 
     undoBtn.position(drawLayout.drawX + drawLayout.drawW - 64, drawLayout.drawY + 12);
 
@@ -336,7 +336,7 @@ function layoutInterface() {
     clearBtn.position(actionX, y);
     submitBtn.position(actionX + (btnW + gap), y);
     nextPromptBtn.position(actionX + (btnW + gap) * 2, y);
-    archiveBtn.position(actionX + (btnW + gap) * 3, y);
+    archiveBtn.position(-9999, -9999);
     undoBtn.position(drawLayout.drawX + drawLayout.drawW - 78, drawLayout.drawY + 16);
 
     backBtn.position(50, 96);
@@ -359,7 +359,7 @@ function layoutInterface() {
     let innerW = drawLayout.toolbarW - 32;
     let gap = 6;
     let toolBtnW = (innerW - gap * 2) / 3;
-    let actionBtnW = (innerW - gap * 3) / 4;
+    let actionBtnW = (innerW - gap * 2) / 3;
 
     brushBtn.size(toolBtnW, 34);
     bucketBtn.size(toolBtnW, 34);
@@ -368,7 +368,7 @@ function layoutInterface() {
     clearBtn.size(actionBtnW, 34);
     submitBtn.size(actionBtnW, 34);
     nextPromptBtn.size(actionBtnW, 34);
-    archiveBtn.size(actionBtnW, 34);
+    archiveBtn.size(1, 1);
   } else {
     let btnW = 68;
     brushBtn.size(btnW, 52);
@@ -377,7 +377,7 @@ function layoutInterface() {
     clearBtn.size(btnW, 52);
     submitBtn.size(btnW, 52);
     nextPromptBtn.size(btnW, 52);
-    archiveBtn.size(btnW, 52);
+    archiveBtn.size(1, 1);
   }
   sizeArchiveButton(backBtn);
   sizeArchiveButton(gridBtn);
@@ -488,7 +488,7 @@ function updateButtonVisibility() {
       clearBtn.show();
       submitBtn.show();
       nextPromptBtn.show();
-      archiveBtn.show();
+      archiveBtn.hide();
     } else {
       colorPicker.hide();
       sizeSlider.hide();
@@ -525,12 +525,12 @@ function updateButtonVisibility() {
     nextPromptBtn.hide();
     archiveBtn.hide();
 
-    backBtn.show();
-    gridBtn.show();
-    wallBtn.show();
-    layerBtn.show();
-    stackBtn.show();
-    exportBtn.show();
+    backBtn.hide();
+    gridBtn.hide();
+    wallBtn.hide();
+    layerBtn.hide();
+    stackBtn.hide();
+    exportBtn.hide();
     //clearArchiveBtn.show();
   }
 }
@@ -917,8 +917,9 @@ function generateDrawBackgroundApplesLayout() {
 
   let mobile = isMobileScreen();
   let sidebarW = mobile ? 0 : getDrawSidebarWidth();
-  let count = archive.length;
+  let count = mobile ? min(archive.length, 24) : archive.length;
   let recent = archive.slice(-count);
+  let archiveStartIndex = archive.length - recent.length;
   let left = sidebarW + (mobile ? 18 : 34);
   let right = width - (mobile ? 18 : 34);
   let top = mobile ? 86 : 28;
@@ -944,7 +945,7 @@ function generateDrawBackgroundApplesLayout() {
     }
 
     drawBackgroundApplesLayout.push({
-      archiveIndex: archive.indexOf(recent[i]),
+      archiveIndex: archiveStartIndex + i,
       x: x,
       y: random(top, bottom),
       cardW: cardW,
@@ -964,6 +965,7 @@ function drawFloatingArchiveApples() {
   if (drawBackgroundApplesLayout.length === 0) generateDrawBackgroundApplesLayout();
 
   let thumbCacheBuildsThisFrame = 0;
+  let mobile = isMobileScreen();
 
   for (let item of drawBackgroundApplesLayout) {
     let d = archive[item.archiveIndex];
@@ -976,12 +978,12 @@ function drawFloatingArchiveApples() {
     }
 
     let t = millis() * item.speed + item.phase;
-    let floatX = sin(t * 0.8) * item.drift;
-    let floatY = cos(t) * item.drift;
+    let floatX = mobile ? sin(t * 0.6) * item.drift * 0.35 : sin(t * 0.8) * item.drift;
+    let floatY = mobile ? cos(t * 0.6) * item.drift * 0.35 : cos(t) * item.drift;
 
     push();
     translate(item.x + floatX, item.y + floatY);
-    rotate(item.rotation + sin(t * 1.4) * 0.025);
+    rotate(item.rotation + (mobile ? 0 : sin(t * 1.4) * 0.025));
 
     if (backgroundViewMode === "slice") {
       drawFloatingSliceCard(d, item);
@@ -1516,22 +1518,10 @@ function archiveCanPanAt(x, y) {
 }
 
 function handleDrawPageClick(x, y) {
-  if (isClickOnApplePopupClose(x, y)) {
-    selectedApple = null;
-    selectedAppleIndex = -1;
-    return true;
-  }
-
-  if (isClickOnApplePopup(x, y)) {
-    return true;
-  }
-
   let switchMode = getViewSwitcherHit(x, y);
   if (switchMode) {
     if (backgroundViewMode !== switchMode) {
       backgroundViewMode = switchMode;
-      selectedApple = null;
-      selectedAppleIndex = -1;
       generateDrawBackgroundApplesLayout();
     }
     return true;
@@ -1901,7 +1891,8 @@ function saveCurrentDrawing() {
 
   archive.push(drawingData);
   saveArchive();
-  refreshArchiveViews();
+  generateDrawBackgroundApplesLayout();
+  markStackDirty();
   saveDrawingToCloud(drawingData);
 
   return true;
