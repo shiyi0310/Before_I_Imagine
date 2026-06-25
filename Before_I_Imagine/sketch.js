@@ -916,7 +916,7 @@ function generateDrawBackgroundApplesLayout() {
 
   let mobile = isMobileScreen();
   let sidebarW = mobile ? 0 : getDrawSidebarWidth();
-  let count = min(archive.length, mobile ? 14 : 34);
+  let count = archive.length;
   let recent = archive.slice(-count);
   let left = sidebarW + (mobile ? 18 : 34);
   let right = width - (mobile ? 18 : 34);
@@ -1596,13 +1596,6 @@ function handleDrawPageClick(x, y) {
   if (cardIndex >= 0) {
     selectedAppleIndex = cardIndex;
     selectedApple = archive[cardIndex] || null;
-    return true;
-  }
-
-  if (
-    !isClickOnViewSwitcher(x, y)
-  ) {
-    toggleBackgroundLayout();
     return true;
   }
 
