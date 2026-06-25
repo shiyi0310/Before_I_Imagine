@@ -108,9 +108,9 @@ let oldStorageKeys = [
 let archiveWallLayout = [];
 let layerLayout = [];
 let drawBackgroundApplesLayout = [];
-const BG_THUMB_SIZE = 96;
 const maxThumbCacheBuildsPerFrame = 4;
 let modalOpen = true;
+let mobileArchiveReady = false;
 let backgroundViewMode = "wall";
 let backgroundLayoutMode = "float";
 let selectedApple = null;
@@ -637,9 +637,13 @@ function drawImmersiveDrawingPage() {
   let p = prompts[promptIndex];
 
   drawPaperBackground();
-  drawFloatingArchiveApples();
-  drawDrawPageSidebar();
-  drawBackgroundViewSwitcher();
+  if (!isMobileScreen()) {
+    drawFloatingArchiveApples();
+    drawDrawPageSidebar();
+    drawBackgroundViewSwitcher();
+  } else if (mobileArchiveReady && !modalOpen) {
+    drawFloatingArchiveApples();
+  }
 
   if (modalOpen) {
     drawDrawingModalShadow();
@@ -668,6 +672,10 @@ function drawPaperBackground() {
 
 function getDrawSidebarWidth() {
   return constrain(width * 0.135, 190, 220);
+}
+
+function getBackgroundThumbSize() {
+  return isMobileScreen() ? 72 : 96;
 }
 
 function drawDrawingModalShadow() {
@@ -917,7 +925,7 @@ function generateDrawBackgroundApplesLayout() {
 
   let mobile = isMobileScreen();
   let sidebarW = mobile ? 0 : getDrawSidebarWidth();
-  let count = mobile ? min(archive.length, 24) : archive.length;
+  let count = mobile ? min(archive.length, 12) : archive.length;
   let recent = archive.slice(-count);
   let archiveStartIndex = archive.length - recent.length;
   let left = sidebarW + (mobile ? 18 : 34);
@@ -961,18 +969,20 @@ function generateDrawBackgroundApplesLayout() {
 }
 
 function drawFloatingArchiveApples() {
+  if (isMobileScreen() && (!mobileArchiveReady || modalOpen)) return;
   if (archive.length === 0) return;
   if (drawBackgroundApplesLayout.length === 0) generateDrawBackgroundApplesLayout();
 
   let thumbCacheBuildsThisFrame = 0;
   let mobile = isMobileScreen();
+  let thumbSize = getBackgroundThumbSize();
 
   for (let item of drawBackgroundApplesLayout) {
     let d = archive[item.archiveIndex];
     if (!d) continue;
     if (!item.cachedThumb) {
       if (thumbCacheBuildsThisFrame < maxThumbCacheBuildsPerFrame) {
-        item.cachedThumb = getCachedStaticMini(d, BG_THUMB_SIZE, BG_THUMB_SIZE);
+        item.cachedThumb = getCachedStaticMini(d, thumbSize, thumbSize);
         thumbCacheBuildsThisFrame++;
       }
     }
@@ -1530,6 +1540,7 @@ function handleDrawPageClick(x, y) {
   if (modalOpen && isClickOnModalClose(x, y)) {
     modalOpen = false;
     currentAction = null;
+    if (isMobileScreen()) mobileArchiveReady = true;
     layoutInterface();
     return true;
   }
@@ -1891,7 +1902,9 @@ function saveCurrentDrawing() {
 
   archive.push(drawingData);
   saveArchive();
-  generateDrawBackgroundApplesLayout();
+  if (!isMobileScreen() || mobileArchiveReady) {
+    generateDrawBackgroundApplesLayout();
+  }
   markStackDirty();
   saveDrawingToCloud(drawingData);
 
