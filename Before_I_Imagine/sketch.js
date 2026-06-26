@@ -1600,10 +1600,10 @@ function getApplePopupRect() {
 function getApplePopupCloseRect() {
   let r = getApplePopupRect();
   return {
-    x: r.x + r.w - 34,
-    y: r.y + 28,
-    w: 18,
-    h: 18
+    x: r.x + r.w - 54,
+    y: r.y + 18,
+    w: 42,
+    h: 42
   };
 }
 
@@ -2297,6 +2297,21 @@ function getArchiveRowPanBounds(rowIndex) {
   let rowW = rowCount * 74 + 150;
   let minX = -max(0, rowW - frame.w);
   return { min: minX, max: 0 };
+}
+
+function getArchiveCardsSafeFrame() {
+  let sidebarW = isMobileScreen() ? 0 : getDrawSidebarWidth();
+  let left = sidebarW + (isMobileScreen() ? 20 : 64);
+  let top = isMobileScreen() ? 92 : getArchiveRowsTop() - 78;
+  let right = width - (isMobileScreen() ? 20 : 56);
+  let bottom = height - 62;
+
+  return {
+    x: left,
+    y: top,
+    w: max(1, right - left),
+    h: max(1, bottom - top)
+  };
 }
 
 function applyArchiveRowPanDelta(rowIndex, dx, withResistance) {
