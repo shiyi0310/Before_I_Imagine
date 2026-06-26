@@ -2876,7 +2876,7 @@ async function saveDrawingToCloud(drawingData) {
     delete cloudDrawing.preview;
     let exportCrop = drawingData.drawingArea || getCurrentDrawingExportArea();
     let imageDataUrl = createDrawingLayerImageDataURL(drawingLayer, exportCrop.w, exportCrop.h, 0.82, exportCrop);
-    let thumbDataUrl = createDrawingLayerImageDataURL(drawingLayer, 1000, 1000, 0.72, exportCrop);
+    let thumbDataUrl = createDrawingLayerImageDataURL(drawingLayer, 420, 420, 0.72, exportCrop);
 
     const response = await fetch("/api/drawings", {
       method: "POST",
@@ -2924,13 +2924,54 @@ function getCroppedSourceImage(sourceLayer, cropRect) {
   let w = constrain(floor(cropRect.w || sourceLayer.width), 1, sourceLayer.width - x);
   let h = constrain(floor(cropRect.h || sourceLayer.height), 1, sourceLayer.height - y);
 
-  return sourceLayer.get(x, y, w, h);
+  let cropped = sourceLayer.get(x, y, w, h);
+  let contentBounds = getOpaquePixelBounds(cropped, 8);
+  if (!contentBounds) return cropped;
+
+  let padding = max(12, floor(max(contentBounds.w, contentBounds.h) * 0.14));
+  let contentX = max(0, contentBounds.x - padding);
+  let contentY = max(0, contentBounds.y - padding);
+  let contentW = min(cropped.width - contentX, contentBounds.w + padding * 2);
+  let contentH = min(cropped.height - contentY, contentBounds.h + padding * 2);
+
+  return cropped.get(contentX, contentY, contentW, contentH);
+}
+
+function getOpaquePixelBounds(img, alphaThreshold = 8) {
+  if (!img || !img.loadPixels) return null;
+  img.loadPixels();
+
+  let minX = img.width;
+  let minY = img.height;
+  let maxX = -1;
+  let maxY = -1;
+
+  for (let y = 0; y < img.height; y++) {
+    for (let x = 0; x < img.width; x++) {
+      let index = (y * img.width + x) * 4 + 3;
+      if (img.pixels[index] > alphaThreshold) {
+        minX = min(minX, x);
+        minY = min(minY, y);
+        maxX = max(maxX, x);
+        maxY = max(maxY, y);
+      }
+    }
+  }
+
+  if (maxX < minX || maxY < minY) return null;
+
+  return {
+    x: minX,
+    y: minY,
+    w: maxX - minX + 1,
+    h: maxY - minY + 1
+  };
 }
 
 function drawSourceImageContained(targetGraphics, sourceGraphics, targetW, targetH) {
   let sourceW = sourceGraphics.width || targetW;
   let sourceH = sourceGraphics.height || targetH;
-  let scale = min(targetW / sourceW, targetH / sourceH)*1.5;
+  let scale = min(targetW / sourceW, targetH / sourceH);
   let drawW = sourceW * scale;
   let drawH = sourceH * scale;
   let drawX = (targetW - drawW) / 2;
@@ -2978,7 +3019,14 @@ function createDrawingImageDataURL(drawingData, imageW, imageH, quality) {
   g.clear();
   g.smooth();
   let source = renderDrawingToOriginalGraphics(drawingData);
-  drawSourceImageContained(g, source, imageW, imageH);
+  let cropRect = drawingData.drawingArea || {
+    x: 0,
+    y: drawingData.headerHeight || headerH,
+    w: source.width,
+    h: max(1, source.height - (drawingData.headerHeight || headerH))
+  };
+  let croppedSource = getCroppedSourceImage(source, cropRect);
+  drawSourceImageContained(g, croppedSource, imageW, imageH);
 
   let dataURL = "";
   try {
@@ -2994,6 +3042,9 @@ function createDrawingImageDataURL(drawingData, imageW, imageH, quality) {
   try {
     if (source && source.canvas && source.canvas.parentNode) {
       source.canvas.parentNode.removeChild(source.canvas);
+    }
+    if (croppedSource !== source && croppedSource && croppedSource.canvas && croppedSource.canvas.parentNode) {
+      croppedSource.canvas.parentNode.removeChild(croppedSource.canvas);
     }
     if (g && g.canvas && g.canvas.parentNode) {
       g.canvas.parentNode.removeChild(g.canvas);
@@ -3221,7 +3272,7 @@ async function backfillMissingImageUrls(batchSize = 5) {
         : createDrawingImageDataURL(drawing, drawing.canvasWidth || width, drawing.canvasHeight || height, 0.82);
       let thumbDataUrl = drawing.thumb_url
         ? null
-        : createDrawingImageDataURL(drawing, 1000, 1000, 0.72);
+        : createDrawingImageDataURL(drawing,1000, 1000, 0.72);
 
       try {
         const updateResponse = await fetch(`/api/drawings/${drawing.dbId}/images`, {
