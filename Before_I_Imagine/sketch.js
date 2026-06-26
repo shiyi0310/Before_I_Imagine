@@ -1118,9 +1118,7 @@ function drawFloatingArchiveApples() {
   if (archive.length === 0) return;
   if (drawBackgroundApplesLayout.length === 0) generateDrawBackgroundApplesLayout();
 
-  let thumbCacheBuildsThisFrame = 0;
   let mobile = isMobileScreen();
-  let thumbSize = getBackgroundThumbSize();
 
   if (backgroundViewMode === "slice") {
     push();
@@ -1134,9 +1132,6 @@ function drawFloatingArchiveApples() {
       let preview = getPreviewImage(d);
       if (preview) {
         item.cachedThumb = preview;
-      } else if (!hasPreviewData(d) && thumbCacheBuildsThisFrame < maxThumbCacheBuildsPerFrame) {
-        item.cachedThumb = getCachedStaticMini(d, thumbSize, thumbSize);
-        thumbCacheBuildsThisFrame++;
       }
     }
 
@@ -1190,13 +1185,15 @@ function drawFloatingArchiveApples() {
 }
 
 function drawFloatingWallCard(d, item) {
-  if (!item.cachedThumb) return;
-
   push();
   translate(-item.size / 2, -item.size / 2);
-  tint(255, 255 * min(0.92, item.alpha + 0.12));
-  image(item.cachedThumb, 0, 0, item.size, item.size);
-  noTint();
+  if (item.cachedThumb) {
+    tint(255, 255 * min(0.92, item.alpha + 0.12));
+    image(item.cachedThumb, 0, 0, item.size, item.size);
+    noTint();
+  } else {
+    drawMissingImagePlaceholder(item.size, item.size);
+  }
   pop();
 }
 
@@ -1214,14 +1211,16 @@ function drawFloatingSliceCard(d, item) {
   noFill();
   rect(-w / 2 + 0.5, -h / 2 + 0.5, w - 1, h - 1, 8);
 
+  push();
+  translate(-item.size / 2, -item.size / 2);
   if (item.cachedThumb) {
-    push();
-    translate(-item.size / 2, -item.size / 2);
     tint(255, 255 * item.alpha);
     image(item.cachedThumb, 0, 0, item.size, item.size);
     noTint();
-    pop();
+  } else {
+    drawMissingImagePlaceholder(item.size, item.size);
   }
+  pop();
 }
 
 function drawArchiveTarotCard(d, item, cardW, cardH, hovered) {
@@ -1239,15 +1238,17 @@ function drawArchiveTarotCard(d, item, cardW, cardH, hovered) {
   noFill();
   rect(-cardW / 2 + 0.5, -cardH / 2 + 0.5, cardW - 1, cardH - 1, 7);
 
+  let imageSize = cardW * 0.76;
+  push();
+  translate(-imageSize / 2, -imageSize / 2 - cardH * 0.04);
   if (item.cachedThumb) {
-    let imageSize = cardW * 0.76;
-    push();
-    translate(-imageSize / 2, -imageSize / 2 - cardH * 0.04);
     tint(255, hovered ? 245 : 210);
     image(item.cachedThumb, 0, 0, imageSize, imageSize);
     noTint();
-    pop();
+  } else {
+    drawMissingImagePlaceholder(imageSize, imageSize);
   }
+  pop();
 
   noStroke();
   fill(80, 73, 66, hovered ? 170 : 122);
@@ -2851,8 +2852,8 @@ async function fetchDrawingDetails(index) {
     archive[index] = {
       ...drawing,
       ...fullDrawing,
-      thumb_url: fullDrawing.thumb_url || drawing.thumb_url || null,
-      image_url: fullDrawing.image_url || drawing.image_url || null
+      thumb_url: fullDrawing.thumb_url || null,
+      image_url: fullDrawing.image_url || null
     };
 
     if (selectedAppleIndex === index) {
@@ -3055,18 +3056,21 @@ function hasPreviewData(d) {
     d &&
     (
       typeof d.thumb_url === "string" ||
-      typeof d.image_url === "string" ||
-      (typeof d.preview === "string" && d.preview.startsWith("data:image/"))
+      typeof d.image_url === "string"
     )
   );
+}
+
+function hasLegacyPreviewData(d) {
+  return Boolean(d && typeof d.preview === "string" && d.preview.startsWith("data:image/"));
 }
 
 function getPreviewImage(d) {
   if (!hasPreviewData(d)) return null;
 
-  let src = d.thumb_url || d.image_url || d.preview;
+  let src = d.thumb_url || d.image_url;
   let key = `${d.dbId || d.id || d.createdAt || archive.indexOf(d)}_${src}`;
-  let cache = src && src.startsWith("data:image/") ? previewImageCache : imageURLCache;
+  let cache = imageURLCache;
   let cached = cache[key];
 
   if (cached) {
@@ -3099,7 +3103,7 @@ async function backfillMissingPreviews() {
   let skipped = 0;
 
   for (let drawing of archive) {
-    if (!drawing || hasPreviewData(drawing)) {
+    if (!drawing || hasLegacyPreviewData(drawing)) {
       skipped++;
       continue;
     }
@@ -4179,28 +4183,28 @@ function drawStaticMini(d, miniW, miniH) {
     return;
   }
 
-  let g = getCachedStaticMini(d, miniW, miniH);
-  image(g, 0, 0);
+  drawMissingImagePlaceholder(miniW, miniH);
+}
+
+function drawMissingImagePlaceholder(w, h) {
+  push();
+  noStroke();
+  fill(248, 244, 236, 150);
+  rect(0, 0, w, h, 6);
+  stroke(210, 202, 190, 150);
+  strokeWeight(1);
+  noFill();
+  rect(0.5, 0.5, w - 1, h - 1, 6);
+  noStroke();
+  fill(120, 112, 104, 140);
+  textAlign(CENTER, CENTER);
+  textSize(constrain(w * 0.08, 8, 12));
+  text("image pending", w / 2, h / 2);
+  pop();
 }
 
 function getCachedStaticMini(d, miniW, miniH) {
-  let key = [
-    d.id || d.createdAt || archive.indexOf(d),
-    floor(miniW),
-    floor(miniH),
-    countDrawingUnits(d)
-  ].join("_");
-
-  if (!gridMiniCache[key]) {
-    let g = createGraphics(miniW, miniH);
-    g.pixelDensity(pd);
-    g.clear();
-    g.smooth();
-    renderDrawingToGraphics(g, d, 999999, true, 1);
-    gridMiniCache[key] = g;
-  }
-
-  return gridMiniCache[key];
+  return null;
 }
 
 function clearGridMiniCache() {

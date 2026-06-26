@@ -35,8 +35,8 @@ function attachDatabaseFields(row) {
     ...drawing,
     dbId: row.id,
     dbCreatedAt: row.created_at,
-    image_url: row.image_url || drawing.image_url || null,
-    thumb_url: row.thumb_url || drawing.thumb_url || null
+    image_url: row.image_url || null,
+    thumb_url: row.thumb_url || null
   };
 }
 
@@ -58,8 +58,8 @@ function attachLightDatabaseFields(row) {
     id: light.id || row.id,
     dbCreatedAt: row.created_at,
     createdAt: light.createdAt || row.created_at,
-    image_url: row.image_url || light.image_url || null,
-    thumb_url: row.thumb_url || light.thumb_url || null
+    image_url: row.image_url || null,
+    thumb_url: row.thumb_url || null
   };
 }
 
@@ -226,12 +226,12 @@ app.patch("/api/drawings/:id/images", async (req, res) => {
     ? existing.drawing
     : {};
   const drawingId = drawing.id || existing.id;
-  const imageUrl = existing.image_url || drawing.image_url || await uploadDrawingImage(imageDataUrl, "full", drawingId);
-  const thumbUrl = existing.thumb_url || drawing.thumb_url || await uploadDrawingImage(thumbDataUrl, "thumb", drawingId);
+  const imageUrl = existing.image_url || await uploadDrawingImage(imageDataUrl, "full", drawingId);
+  const thumbUrl = existing.thumb_url || await uploadDrawingImage(thumbDataUrl, "thumb", drawingId);
   const updatedDrawing = {
     ...drawing,
-    image_url: imageUrl || drawing.image_url || null,
-    thumb_url: thumbUrl || drawing.thumb_url || null
+    image_url: imageUrl || null,
+    thumb_url: thumbUrl || null
   };
 
   const { data, error } = await supabase
