@@ -3048,6 +3048,70 @@ async function backfillMissingPreviews() {
 
 window.backfillMissingPreviews = backfillMissingPreviews;
 
+async function backfillMissingImageUrls(batchSize = 5) {
+  let processed = 0;
+  let total = 0;
+
+  while (true) {
+    const response = await fetch(`/api/drawings/missing-images?limit=${batchSize}`);
+    if (!response.ok) {
+      throw new Error(await response.text());
+    }
+
+    const payload = await response.json();
+    const drawings = (Array.isArray(payload) ? payload : payload.drawings || [])
+      .map(normalizeDrawingData)
+      .filter(Boolean);
+    total = Array.isArray(payload) ? max(total, processed + drawings.length) : payload.total || 0;
+    if (drawings.length === 0) {
+      console.log(`Image URL backfill complete. Processed ${processed} drawings.`);
+      break;
+    }
+
+    for (let drawing of drawings) {
+      if (!drawing.dbId) {
+        console.warn("Skipping drawing without dbId:", drawing.id || drawing.createdAt);
+        continue;
+      }
+
+      let imageDataUrl = drawing.image_url
+        ? null
+        : createDrawingImageDataURL(drawing, drawing.canvasWidth || width, drawing.canvasHeight || height, 0.82);
+      let thumbDataUrl = drawing.thumb_url
+        ? null
+        : createDrawingImageDataURL(drawing, 320, 240, 0.72);
+
+      try {
+        const updateResponse = await fetch(`/api/drawings/${drawing.dbId}/images`, {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({ imageDataUrl, thumbDataUrl })
+        });
+
+        if (!updateResponse.ok) {
+          throw new Error(await updateResponse.text());
+        }
+
+        processed++;
+        console.log(`Image URL backfill: processed ${processed} / ${total}`);
+      } catch (error) {
+        console.warn("Could not backfill image URLs:", drawing.dbId, error);
+      }
+    }
+
+    if (drawings.length < batchSize) {
+      console.log(`Image URL backfill complete. Processed ${processed} drawings.`);
+      break;
+    }
+  }
+
+  return processed;
+}
+
+window.backfillMissingImageUrls = backfillMissingImageUrls;
+
 function refreshArchiveViews() {
   clearGridMiniCache();
   generateArchiveWallLayout();

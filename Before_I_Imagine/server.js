@@ -119,6 +119,31 @@ app.get("/api/drawings", async (req, res) => {
   return res.json(data.map(attachLightDatabaseFields));
 });
 
+app.get("/api/drawings/missing-images", async (req, res) => {
+  if (!supabase) {
+    return res.status(500).json({
+      error: "Supabase is not configured. Add SUPABASE_URL and SUPABASE_SERVICE_KEY in Render Environment."
+    });
+  }
+
+  const limit = Math.min(Math.max(Number(req.query.limit) || 10, 1), 25);
+  const { data, error, count } = await supabase
+    .from("drawings")
+    .select("id, created_at, drawing, image_url, thumb_url", { count: "exact" })
+    .or("image_url.is.null,thumb_url.is.null")
+    .order("created_at", { ascending: true })
+    .limit(limit);
+
+  if (error) {
+    return res.status(500).json({ error: error.message });
+  }
+
+  return res.json({
+    total: count || 0,
+    drawings: data.map(attachDatabaseFields)
+  });
+});
+
 app.get("/api/drawings/:id", async (req, res) => {
   if (!supabase) {
     return res.status(500).json({
@@ -176,6 +201,55 @@ app.post("/api/drawings", async (req, res) => {
   }
 
   return res.status(201).json(attachDatabaseFields(data));
+});
+
+app.patch("/api/drawings/:id/images", async (req, res) => {
+  if (!supabase) {
+    return res.status(500).json({
+      error: "Supabase is not configured. Add SUPABASE_URL and SUPABASE_SERVICE_KEY in Render Environment."
+    });
+  }
+
+  const { imageDataUrl, thumbDataUrl } = req.body || {};
+
+  const { data: existing, error: selectError } = await supabase
+    .from("drawings")
+    .select("id, created_at, drawing, image_url, thumb_url")
+    .eq("id", req.params.id)
+    .single();
+
+  if (selectError) {
+    return res.status(500).json({ error: selectError.message });
+  }
+
+  const drawing = existing && existing.drawing && typeof existing.drawing === "object"
+    ? existing.drawing
+    : {};
+  const drawingId = drawing.id || existing.id;
+  const imageUrl = existing.image_url || drawing.image_url || await uploadDrawingImage(imageDataUrl, "full", drawingId);
+  const thumbUrl = existing.thumb_url || drawing.thumb_url || await uploadDrawingImage(thumbDataUrl, "thumb", drawingId);
+  const updatedDrawing = {
+    ...drawing,
+    image_url: imageUrl || drawing.image_url || null,
+    thumb_url: thumbUrl || drawing.thumb_url || null
+  };
+
+  const { data, error } = await supabase
+    .from("drawings")
+    .update({
+      drawing: updatedDrawing,
+      image_url: existing.image_url || imageUrl || null,
+      thumb_url: existing.thumb_url || thumbUrl || null
+    })
+    .eq("id", req.params.id)
+    .select("id, created_at, drawing, image_url, thumb_url")
+    .single();
+
+  if (error) {
+    return res.status(500).json({ error: error.message });
+  }
+
+  return res.json(attachDatabaseFields(data));
 });
 
 app.patch("/api/drawings/:id", async (req, res) => {
