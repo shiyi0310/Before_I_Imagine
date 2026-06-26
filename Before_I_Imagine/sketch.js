@@ -137,6 +137,7 @@ let stackDirty = true;
 let stackRenderedCount = 0;
 let gridMiniCache = {};
 let previewImageCache = {};
+let imageURLCache = {};
 let archivePan = { x: 0, y: 0 };
 let archiveSlicePanX = 0;
 let archiveSliceDragging = false;
@@ -1802,8 +1803,7 @@ function mouseClicked() {
   if (isMobileArchiveMode() && !isClickOnViewSwitcher(mouseX, mouseY)) {
     let hitIndex = getMobileArchiveCardAt(mouseX, mouseY);
     if (hitIndex >= 0) {
-      selectedAppleIndex = hitIndex;
-      selectedApple = archive[hitIndex] || null;
+      selectArchiveDrawing(hitIndex);
       return false;
     }
   }
@@ -2021,8 +2021,7 @@ function handlePointerReleased() {
     if (archiveRowDragDistance < 8) {
       let hitIndex = getArchiveModeCardAt(archiveRowPressPoint.x, archiveRowPressPoint.y);
       if (hitIndex >= 0) {
-        selectedAppleIndex = hitIndex;
-        selectedApple = archive[hitIndex] || null;
+        selectArchiveDrawing(hitIndex);
       }
     }
     if (abs(archiveRowVelocity[archiveRowDragIndex] || 0) < 0.02) {
@@ -2036,8 +2035,7 @@ function handlePointerReleased() {
     if (wallDragDistance < 8) {
       let hitIndex = getArchiveWallAppleAt(wallPressPoint.x, wallPressPoint.y);
       if (hitIndex >= 0) {
-        selectedAppleIndex = hitIndex;
-        selectedApple = archive[hitIndex] || null;
+        selectArchiveDrawing(hitIndex);
       }
     }
     isWallPanning = false;
@@ -2047,8 +2045,7 @@ function handlePointerReleased() {
     if (isMobileArchiveMode() && mobileArchiveDragDistance < 8) {
       let hitIndex = getMobileArchiveCardAt(mobileArchivePressPoint.x, mobileArchivePressPoint.y);
       if (hitIndex >= 0) {
-        selectedAppleIndex = hitIndex;
-        selectedApple = archive[hitIndex] || null;
+        selectArchiveDrawing(hitIndex);
       }
     }
     isArchivePanning = false;
@@ -2834,14 +2831,55 @@ async function loadArchive() {
   }
 }
 
+function selectArchiveDrawing(index) {
+  selectedAppleIndex = index;
+  selectedApple = archive[index] || null;
+  fetchDrawingDetails(index);
+}
+
+async function fetchDrawingDetails(index) {
+  let drawing = archive[index];
+  if (!drawing || drawing.actions || !drawing.dbId) return;
+
+  try {
+    const response = await fetch(`/api/drawings/${drawing.dbId}`);
+    if (!response.ok) throw new Error(await response.text());
+
+    const fullDrawing = normalizeDrawingData(await response.json());
+    if (!fullDrawing) return;
+
+    archive[index] = {
+      ...drawing,
+      ...fullDrawing,
+      thumb_url: fullDrawing.thumb_url || drawing.thumb_url || null,
+      image_url: fullDrawing.image_url || drawing.image_url || null
+    };
+
+    if (selectedAppleIndex === index) {
+      selectedApple = archive[index];
+    }
+  } catch (error) {
+    console.warn("Could not load full drawing details:", error);
+  }
+}
+
 async function saveDrawingToCloud(drawingData) {
   try {
+    let cloudDrawing = JSON.parse(JSON.stringify(drawingData));
+    delete cloudDrawing.preview;
+    let imageDataUrl = createDrawingImageDataURL(drawingData, drawingData.canvasWidth || width, drawingData.canvasHeight || height, 0.82);
+    let thumbDataUrl = createDrawingImageDataURL(drawingData, 320, 240, 0.72);
+
     const response = await fetch("/api/drawings", {
       method: "POST",
       headers: {
         "Content-Type": "application/json"
       },
-      body: JSON.stringify(drawingData)
+      body: JSON.stringify({
+        drawing: cloudDrawing,
+        imageDataUrl,
+        thumbDataUrl
+      })
     });
 
     if (!response.ok) {
@@ -2851,11 +2889,42 @@ async function saveDrawingToCloud(drawingData) {
     let saved = await response.json();
     if (saved && saved.dbId) {
       drawingData.dbId = saved.dbId;
+      drawingData.image_url = saved.image_url || null;
+      drawingData.thumb_url = saved.thumb_url || null;
       saveArchive();
     }
   } catch (error) {
     console.warn("Could not save drawing to server. It is still saved locally:", error);
   }
+}
+
+function createDrawingImageDataURL(drawingData, imageW, imageH, quality) {
+  let g = createGraphics(imageW, imageH);
+  g.pixelDensity(1);
+  g.clear();
+  g.smooth();
+  renderDrawingToGraphics(g, drawingData, 999999, true, 1);
+
+  let dataURL = "";
+  try {
+    dataURL = g.canvas.toDataURL("image/webp", quality);
+  } catch (error) {
+    dataURL = "";
+  }
+
+  if (!dataURL || !dataURL.startsWith("data:image/webp")) {
+    dataURL = g.canvas.toDataURL("image/png");
+  }
+
+  try {
+    if (g && g.canvas && g.canvas.parentNode) {
+      g.canvas.parentNode.removeChild(g.canvas);
+    }
+  } catch (error) {
+    console.warn("Could not remove drawing image graphics canvas:", error);
+  }
+
+  return dataURL;
 }
 
 function createDrawingPreviewDataURL(drawingData, previewW, previewH) {
@@ -2888,14 +2957,23 @@ function createDrawingPreviewDataURL(drawingData, previewW, previewH) {
 }
 
 function hasPreviewData(d) {
-  return Boolean(d && typeof d.preview === "string" && d.preview.startsWith("data:image/"));
+  return Boolean(
+    d &&
+    (
+      typeof d.thumb_url === "string" ||
+      typeof d.image_url === "string" ||
+      (typeof d.preview === "string" && d.preview.startsWith("data:image/"))
+    )
+  );
 }
 
 function getPreviewImage(d) {
   if (!hasPreviewData(d)) return null;
 
-  let key = d.dbId || d.id || d.createdAt || archive.indexOf(d);
-  let cached = previewImageCache[key];
+  let src = d.thumb_url || d.image_url || d.preview;
+  let key = `${d.dbId || d.id || d.createdAt || archive.indexOf(d)}_${src}`;
+  let cache = src && src.startsWith("data:image/") ? previewImageCache : imageURLCache;
+  let cached = cache[key];
 
   if (cached) {
     return cached.loaded ? cached.img : null;
@@ -2906,10 +2984,10 @@ function getPreviewImage(d) {
     loaded: false,
     failed: false
   };
-  previewImageCache[key] = entry;
+  cache[key] = entry;
 
   entry.img = loadImage(
-    d.preview,
+    src,
     (img) => {
       entry.img = img;
       entry.loaded = true;

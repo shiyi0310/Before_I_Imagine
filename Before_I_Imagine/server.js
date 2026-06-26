@@ -8,6 +8,7 @@ const PORT = process.env.PORT || 3000;
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY;
+const storageBucket = process.env.SUPABASE_STORAGE_BUCKET || "drawing-images";
 const supabase = supabaseUrl && supabaseServiceKey
   ? createClient(supabaseUrl, supabaseServiceKey)
   : null;
@@ -33,8 +34,70 @@ function attachDatabaseFields(row) {
   return {
     ...drawing,
     dbId: row.id,
-    dbCreatedAt: row.created_at
+    dbCreatedAt: row.created_at,
+    image_url: row.image_url || drawing.image_url || null,
+    thumb_url: row.thumb_url || drawing.thumb_url || null
   };
+}
+
+function stripHeavyDrawingFields(drawing) {
+  const light = drawing && typeof drawing === "object" ? { ...drawing } : {};
+  delete light.actions;
+  delete light.strokes;
+  delete light.path;
+  delete light.paths;
+  delete light.preview;
+  return light;
+}
+
+function attachLightDatabaseFields(row) {
+  const light = stripHeavyDrawingFields(row.drawing);
+  return {
+    ...light,
+    dbId: row.id,
+    id: light.id || row.id,
+    dbCreatedAt: row.created_at,
+    createdAt: light.createdAt || row.created_at,
+    image_url: row.image_url || light.image_url || null,
+    thumb_url: row.thumb_url || light.thumb_url || null
+  };
+}
+
+function dataURLToUpload(dataURL) {
+  if (typeof dataURL !== "string" || !dataURL.startsWith("data:image/")) return null;
+  const match = dataURL.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/);
+  if (!match) return null;
+
+  const mimeType = match[1];
+  const extension = mimeType.includes("webp") ? "webp" : mimeType.includes("jpeg") ? "jpg" : "png";
+  return {
+    buffer: Buffer.from(match[2], "base64"),
+    mimeType,
+    extension
+  };
+}
+
+async function uploadDrawingImage(dataURL, prefix, drawingId) {
+  const upload = dataURLToUpload(dataURL);
+  if (!upload) return null;
+
+  const filePath = `${prefix}/${drawingId}-${Date.now()}.${upload.extension}`;
+  const { error } = await supabase.storage
+    .from(storageBucket)
+    .upload(filePath, upload.buffer, {
+      contentType: upload.mimeType,
+      upsert: true
+    });
+
+  if (error) {
+    throw error;
+  }
+
+  const { data } = supabase.storage
+    .from(storageBucket)
+    .getPublicUrl(filePath);
+
+  return data && data.publicUrl ? data.publicUrl : null;
 }
 
 app.get("/api/drawings", async (req, res) => {
@@ -46,14 +109,34 @@ app.get("/api/drawings", async (req, res) => {
 
   const { data, error } = await supabase
     .from("drawings")
-    .select("id, created_at, drawing")
+    .select("id, created_at, drawing, image_url, thumb_url")
     .order("created_at", { ascending: true });
 
   if (error) {
     return res.status(500).json({ error: error.message });
   }
 
-  return res.json(data.map(attachDatabaseFields));
+  return res.json(data.map(attachLightDatabaseFields));
+});
+
+app.get("/api/drawings/:id", async (req, res) => {
+  if (!supabase) {
+    return res.status(500).json({
+      error: "Supabase is not configured. Add SUPABASE_URL and SUPABASE_SERVICE_KEY in Render Environment."
+    });
+  }
+
+  const { data, error } = await supabase
+    .from("drawings")
+    .select("id, created_at, drawing, image_url, thumb_url")
+    .eq("id", req.params.id)
+    .single();
+
+  if (error) {
+    return res.status(500).json({ error: error.message });
+  }
+
+  return res.json(attachDatabaseFields(data));
 });
 
 app.post("/api/drawings", async (req, res) => {
@@ -63,16 +146,29 @@ app.post("/api/drawings", async (req, res) => {
     });
   }
 
-  const drawing = req.body;
+  const body = req.body;
+  const drawing = body && body.drawing && typeof body.drawing === "object"
+    ? body.drawing
+    : body;
 
   if (!drawing || typeof drawing !== "object" || Array.isArray(drawing)) {
     return res.status(400).json({ error: "Invalid drawing data." });
   }
 
+  const drawingId = drawing.id || Date.now();
+  const imageUrl = await uploadDrawingImage(body.imageDataUrl, "full", drawingId);
+  const thumbUrl = await uploadDrawingImage(body.thumbDataUrl, "thumb", drawingId);
+  const storedDrawing = {
+    ...drawing,
+    image_url: imageUrl,
+    thumb_url: thumbUrl
+  };
+  delete storedDrawing.preview;
+
   const { data, error } = await supabase
     .from("drawings")
-    .insert([{ drawing }])
-    .select("id, created_at, drawing")
+    .insert([{ drawing: storedDrawing, image_url: imageUrl, thumb_url: thumbUrl }])
+    .select("id, created_at, drawing, image_url, thumb_url")
     .single();
 
   if (error) {
@@ -97,7 +193,7 @@ app.patch("/api/drawings/:id", async (req, res) => {
 
   const { data: existing, error: selectError } = await supabase
     .from("drawings")
-    .select("id, created_at, drawing")
+    .select("id, created_at, drawing, image_url, thumb_url")
     .eq("id", req.params.id)
     .single();
 
@@ -117,7 +213,7 @@ app.patch("/api/drawings/:id", async (req, res) => {
     .from("drawings")
     .update({ drawing: updatedDrawing })
     .eq("id", req.params.id)
-    .select("id, created_at, drawing")
+    .select("id, created_at, drawing, image_url, thumb_url")
     .single();
 
   if (error) {
