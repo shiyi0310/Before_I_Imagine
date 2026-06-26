@@ -2903,7 +2903,8 @@ function createDrawingImageDataURL(drawingData, imageW, imageH, quality) {
   g.pixelDensity(1);
   g.clear();
   g.smooth();
-  renderDrawingToGraphics(g, drawingData, 999999, true, 1);
+  let source = renderDrawingToOriginalGraphics(drawingData);
+  g.image(source, 0, 0, imageW, imageH);
 
   let dataURL = "";
   try {
@@ -2917,6 +2918,9 @@ function createDrawingImageDataURL(drawingData, imageW, imageH, quality) {
   }
 
   try {
+    if (source && source.canvas && source.canvas.parentNode) {
+      source.canvas.parentNode.removeChild(source.canvas);
+    }
     if (g && g.canvas && g.canvas.parentNode) {
       g.canvas.parentNode.removeChild(g.canvas);
     }
@@ -2925,6 +2929,67 @@ function createDrawingImageDataURL(drawingData, imageW, imageH, quality) {
   }
 
   return dataURL;
+}
+
+function renderDrawingToOriginalGraphics(drawingData) {
+  let originalW = max(1, floor(drawingData.canvasWidth || width));
+  let originalH = max(1, floor(drawingData.canvasHeight || height));
+  let originalHeaderH = floor(drawingData.headerHeight || headerH);
+  let source = createGraphics(originalW, originalH);
+  source.pixelDensity(1);
+  source.clear();
+  source.smooth();
+
+  for (let action of drawingData.actions || []) {
+    if (action.type === "stroke") {
+      let pts = action.points || [];
+
+      if (action.tool === "eraser") {
+        source.erase();
+        source.stroke(0);
+        source.strokeWeight((action.size || 1) * 2.2);
+      } else {
+        source.noErase();
+        source.stroke(action.color || "#111111");
+        source.strokeWeight(action.size || 1);
+      }
+
+      source.strokeCap(ROUND);
+      source.strokeJoin(ROUND);
+
+      if (pts.length === 1) {
+        let p = pts[0];
+        if (action.tool === "eraser") {
+          source.noStroke();
+          source.fill(0);
+          source.circle(p.x, p.y, (action.size || 1) * 2.2);
+        } else {
+          source.noStroke();
+          source.fill(action.color || "#111111");
+          source.circle(p.x, p.y, action.size || 1);
+        }
+      }
+
+      for (let i = 1; i < pts.length; i++) {
+        source.line(pts[i - 1].x, pts[i - 1].y, pts[i].x, pts[i].y);
+      }
+
+      source.noErase();
+    } else if (action.type === "fill") {
+      floodFillOnGraphics(
+        source,
+        floor(action.x),
+        floor(action.y),
+        action.color,
+        0,
+        originalHeaderH,
+        originalW - 1,
+        originalH - 1
+      );
+    }
+  }
+
+  return source;
 }
 
 function createDrawingPreviewDataURL(drawingData, previewW, previewH) {
