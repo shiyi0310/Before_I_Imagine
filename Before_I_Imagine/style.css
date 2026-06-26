@@ -1,9 +1,20 @@
-html, body {
+html,
+body {
   margin: 0;
   padding: 0;
   font-family: "Courier New", Courier, monospace;
   font-weight: 400;
 }
+
 canvas {
   display: block;
+  position: relative;
+  z-index: 1;
+}
+
+.undo-button {
+  position: relative;
+  z-index: 60;
+  pointer-events: auto;
+  touch-action: manipulation;
 }

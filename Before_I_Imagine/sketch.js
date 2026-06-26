@@ -51,6 +51,7 @@ let archiveTaskTitles = [
 
 let promptIndex = 0;
 let promptFlowSaving = false;
+let lastUndoTime = 0;
 
 let actions = [];
 let currentAction = null;
@@ -230,7 +231,10 @@ function createInterface() {
   eraserBtn.mousePressed(() => currentTool = "eraser");
 
   undoBtn = createButton("Undo<br>撤回");
-  undoBtn.mousePressed(undoLastAction);
+  undoBtn.addClass("undo-button");
+  undoBtn.mousePressed(handleUndoClick);
+  undoBtn.elt.addEventListener("touchend", handleUndoClick, { passive: false });
+  undoBtn.elt.addEventListener("pointerup", handleUndoClick);
 
   clearBtn = createButton("Clear<br>清除");
   clearBtn.mousePressed(clearDrawing);
@@ -342,7 +346,9 @@ function layoutInterface() {
     let y = drawLayout.toolbarY + 28;
     let x = drawLayout.toolbarX + 18;
     let gap = 8;
-    let btnW = 68;
+    let toolBtnW = 86;
+    let clearBtnW = 78;
+    let nextBtnW = 132;
 
     colorPicker.position(x, y + 18);
     colorPicker.size(58, 30);
@@ -351,13 +357,13 @@ function layoutInterface() {
 
     let toolX = x + 252;
     brushBtn.position(toolX, y);
-    bucketBtn.position(toolX + (btnW + gap), y);
-    eraserBtn.position(toolX + (btnW + gap) * 2, y);
+    bucketBtn.position(toolX + (toolBtnW + gap), y);
+    eraserBtn.position(toolX + (toolBtnW + gap) * 2, y);
 
-    let actionX = toolX + (btnW + gap) * 3 + 10;
+    let actionX = toolX + (toolBtnW + gap) * 3 + 10;
     clearBtn.position(actionX, y);
-    submitBtn.position(actionX + (btnW + gap), y);
-    nextPromptBtn.position(actionX + (btnW + gap) * 2, y);
+    submitBtn.position(-9999, -9999);
+    nextPromptBtn.position(actionX + clearBtnW + gap, y);
     archiveBtn.position(-9999, -9999);
     undoBtn.position(drawLayout.drawX + drawLayout.drawW - 78, drawLayout.drawY + 16);
 
@@ -392,13 +398,12 @@ function layoutInterface() {
     nextPromptBtn.size(actionBtnW, 34);
     archiveBtn.size(1, 1);
   } else {
-    let btnW = 68;
-    brushBtn.size(btnW, 52);
-    bucketBtn.size(btnW, 52);
-    eraserBtn.size(btnW, 52);
-    clearBtn.size(btnW, 52);
-    submitBtn.size(btnW, 52);
-    nextPromptBtn.size(btnW, 52);
+    setDesktopButtonAutoSize(brushBtn, 78);
+    setDesktopButtonAutoSize(bucketBtn, 78);
+    setDesktopButtonAutoSize(eraserBtn, 82);
+    setDesktopButtonAutoSize(clearBtn, 70);
+    submitBtn.size(1, 1);
+    setDesktopButtonAutoSize(nextPromptBtn, 122, "10px 16px");
     archiveBtn.size(1, 1);
   }
   sizeArchiveButton(backBtn);
@@ -456,11 +461,34 @@ function sizeDrawingButton(btn) {
   btn.style("border", "1px solid #2b2926");
 }
 
+function setDesktopButtonAutoSize(btn, minW, padding = "8px 14px") {
+  btn.style("display", "inline-flex");
+  btn.style("align-items", "center");
+  btn.style("justify-content", "center");
+  btn.style("width", "auto");
+  btn.style("height", "auto");
+  btn.style("min-width", `${minW}px`);
+  btn.style("min-height", "52px");
+  btn.style("padding", padding);
+  btn.style("box-sizing", "border-box");
+  btn.style("white-space", "nowrap");
+  btn.style("line-height", "1.15");
+  btn.style("flex", "0 0 auto");
+}
+
 function sizeArchiveButton(btn) {
-  btn.size(isMobileScreen() ? 54 : 58, 28);
-  btn.style("height", "28px");
-  btn.style("min-width", "0");
-  btn.style("padding", "3px 8px");
+  if (isMobileScreen()) {
+    btn.size(54, 28);
+    btn.style("height", "28px");
+    btn.style("min-width", "0");
+    btn.style("padding", "3px 8px");
+  } else {
+    btn.style("width", "auto");
+    btn.style("height", "auto");
+    btn.style("min-width", "58px");
+    btn.style("min-height", "30px");
+    btn.style("padding", "5px 10px");
+  }
   btn.style("font-size", "11px");
   btn.style("line-height", "1");
   btn.style("border", "1px solid rgba(30, 28, 25, 0.32)");
@@ -470,15 +498,26 @@ function sizeArchiveButton(btn) {
 
 function sizeUndoButton(btn) {
   let mobile = isMobileScreen();
-  btn.size(mobile ? 56 : 64, mobile ? 32 : 36);
-  btn.style("height", mobile ? "32px" : "36px");
-  btn.style("min-width", "0");
-  btn.style("padding", mobile ? "2px 4px" : "4px 8px");
+  if (mobile) {
+    btn.size(56, 32);
+    btn.style("height", "32px");
+    btn.style("min-width", "0");
+    btn.style("padding", "2px 4px");
+  } else {
+    btn.style("width", "auto");
+    btn.style("height", "auto");
+    btn.style("min-width", "64px");
+    btn.style("min-height", "36px");
+    btn.style("padding", "4px 9px");
+  }
   btn.style("font-size", mobile ? "10px" : "12px");
   btn.style("line-height", "1.05");
   btn.style("border", "1px solid rgba(43, 41, 38, 0.45)");
   btn.style("background", "rgba(251, 250, 246, 0.72)");
   btn.style("color", "#2b2926");
+  btn.style("z-index", "60");
+  btn.style("pointer-events", "auto");
+  btn.style("touch-action", "manipulation");
 }
 
 function updateToolButtonStyles() {
@@ -1601,6 +1640,10 @@ function touchStarted() {
     let x = touches[0].x;
     let y = touches[0].y;
 
+    if (page === "draw" && pointInsideUndoButton(x, y)) {
+      return true;
+    }
+
     if (page === "draw") {
       let handled = handlePointerPressed(x, y);
       return !handled;
@@ -1608,10 +1651,6 @@ function touchStarted() {
 
     if (page === "stack" && handleStackControlPress(x, y)) {
       return false;
-    }
-
-    if (page === "draw" && pointInsideUndoButton(x, y)) {
-      return true;
     }
 
     if (page === "draw" && pointInsideDrawingArea(x, y)) {
@@ -1681,6 +1720,7 @@ function handlePointerPressed(x, y) {
   }
 
   if (page === "draw" && pointInsideUndoButton(x, y)) {
+    handleUndoClick();
     return true;
   }
 
@@ -2349,6 +2389,19 @@ function undoLastAction() {
   actions.pop();
   currentAction = null;
   redrawDrawingLayerFromActions();
+}
+
+function handleUndoClick(event) {
+  if (event) {
+    event.preventDefault();
+    event.stopPropagation();
+  }
+
+  let now = Date.now();
+  if (now - lastUndoTime < 300) return;
+  lastUndoTime = now;
+
+  undoLastAction();
 }
 
 function redrawDrawingLayerFromActions() {
