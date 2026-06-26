@@ -2867,8 +2867,8 @@ async function saveDrawingToCloud(drawingData) {
   try {
     let cloudDrawing = JSON.parse(JSON.stringify(drawingData));
     delete cloudDrawing.preview;
-    let imageDataUrl = createDrawingImageDataURL(drawingData, drawingData.canvasWidth || width, drawingData.canvasHeight || height, 0.82);
-    let thumbDataUrl = createDrawingImageDataURL(drawingData, 320, 240, 0.72);
+    let imageDataUrl = createDrawingLayerImageDataURL(drawingLayer, drawingData.canvasWidth || width, drawingData.canvasHeight || height, 0.82);
+    let thumbDataUrl = createDrawingLayerImageDataURL(drawingLayer, 320, 240, 0.72);
 
     const response = await fetch("/api/drawings", {
       method: "POST",
@@ -2896,6 +2896,35 @@ async function saveDrawingToCloud(drawingData) {
   } catch (error) {
     console.warn("Could not save drawing to server. It is still saved locally:", error);
   }
+}
+
+function createDrawingLayerImageDataURL(sourceLayer, imageW, imageH, quality) {
+  let g = createGraphics(imageW, imageH);
+  g.pixelDensity(1);
+  g.clear();
+  g.smooth();
+  g.image(sourceLayer, 0, 0, imageW, imageH);
+
+  let dataURL = "";
+  try {
+    dataURL = g.canvas.toDataURL("image/webp", quality);
+  } catch (error) {
+    dataURL = "";
+  }
+
+  if (!dataURL || !dataURL.startsWith("data:image/webp")) {
+    dataURL = g.canvas.toDataURL("image/png");
+  }
+
+  try {
+    if (g && g.canvas && g.canvas.parentNode) {
+      g.canvas.parentNode.removeChild(g.canvas);
+    }
+  } catch (error) {
+    console.warn("Could not remove drawing layer image graphics canvas:", error);
+  }
+
+  return dataURL;
 }
 
 function createDrawingImageDataURL(drawingData, imageW, imageH, quality) {
