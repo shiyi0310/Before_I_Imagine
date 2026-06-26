@@ -2869,7 +2869,7 @@ async function saveDrawingToCloud(drawingData) {
     let cloudDrawing = JSON.parse(JSON.stringify(drawingData));
     delete cloudDrawing.preview;
     let imageDataUrl = createDrawingLayerImageDataURL(drawingLayer, drawingData.canvasWidth || width, drawingData.canvasHeight || height, 0.82);
-    let thumbDataUrl = createDrawingLayerImageDataURL(drawingLayer, 320, 240, 0.72);
+    let thumbDataUrl = createDrawingLayerImageDataURL(drawingLayer, 320, 320, 0.72);
 
     const response = await fetch("/api/drawings", {
       method: "POST",
@@ -2899,12 +2899,24 @@ async function saveDrawingToCloud(drawingData) {
   }
 }
 
+function drawSourceImageContained(targetGraphics, sourceGraphics, targetW, targetH) {
+  let sourceW = sourceGraphics.width || targetW;
+  let sourceH = sourceGraphics.height || targetH;
+  let scale = min(targetW / sourceW, targetH / sourceH);
+  let drawW = sourceW * scale;
+  let drawH = sourceH * scale;
+  let drawX = (targetW - drawW) / 2;
+  let drawY = (targetH - drawH) / 2;
+
+  targetGraphics.image(sourceGraphics, drawX, drawY, drawW, drawH);
+}
+
 function createDrawingLayerImageDataURL(sourceLayer, imageW, imageH, quality) {
   let g = createGraphics(imageW, imageH);
   g.pixelDensity(1);
   g.clear();
   g.smooth();
-  g.image(sourceLayer, 0, 0, imageW, imageH);
+  drawSourceImageContained(g, sourceLayer, imageW, imageH);
 
   let dataURL = "";
   try {
@@ -2934,7 +2946,7 @@ function createDrawingImageDataURL(drawingData, imageW, imageH, quality) {
   g.clear();
   g.smooth();
   let source = renderDrawingToOriginalGraphics(drawingData);
-  g.image(source, 0, 0, imageW, imageH);
+  drawSourceImageContained(g, source, imageW, imageH);
 
   let dataURL = "";
   try {
