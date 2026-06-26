@@ -117,6 +117,7 @@ let backgroundViewMode = "wall";
 let backgroundLayoutMode = "float";
 let selectedApple = null;
 let selectedAppleIndex = -1;
+let selectedAppleReplayStartedAt = 0;
 let archiveTransition = 0;
 let archiveTargetTransition = 0;
 let archiveRowPan = [0, 0, 0, 0];
@@ -934,7 +935,7 @@ function drawDrawPageSidebar() {
   textAlign(LEFT);
   textSize(14);
   drawingContext.letterSpacing = "2px";
-  text("BEFORE I IMAGINE", 30, 42);
+  text("Is This an Apple?", 30, 42);
   drawingContext.letterSpacing = "0px";
 
   fill(mutedCol);
@@ -1532,7 +1533,7 @@ function drawSelectedApplePopup() {
   let thumbX = r.x + 22;
   let thumbY = r.y + 88;
   let thumbW = r.w - 44;
-  let thumbH = min(190, r.h * 0.34);
+  let thumbH = min(260, r.h * 0.46);
 
   fill(paperCol);
   stroke(226, 220, 210);
@@ -1540,7 +1541,7 @@ function drawSelectedApplePopup() {
 
   push();
   translate(thumbX + 16, thumbY + 14);
-  drawStaticMini(selectedApple, thumbW - 32, thumbH - 28);
+  drawSelectedAppleReplay(selectedApple, thumbW - 32, thumbH - 28);
   pop();
 
   let promptKey = getDrawingPromptIndex(selectedApple);
@@ -1583,18 +1584,35 @@ function drawSelectedApplePopup() {
 }
 
 function getApplePopupRect() {
-  let w = isMobileScreen() ? min(width - 36, 310) : 300;
-  let h = isMobileScreen() ? min(height - 120, 440) : 460;
+  let w = isMobileScreen() ? min(width - 36, 340) : min(520, width - getDrawSidebarWidth() - 120);
+  let h = isMobileScreen() ? min(height - 120, 520) : min(560, height - 120);
   let sidebarW = isMobileScreen() ? 0 : getDrawSidebarWidth();
-  let x = isMobileScreen() ? (width - w) / 2 : width - w - 42;
-  let y = isMobileScreen() ? 96 : max(126, (height - h) / 2);
-
-  if (!isMobileScreen() && modalOpen && x < drawLayout.modalX + drawLayout.modalW + 24) {
-    x = max(sidebarW + 24, drawLayout.modalX + drawLayout.modalW + 24);
-    if (x + w > width - 24) x = width - w - 24;
-  }
+  let x = isMobileScreen() ? (width - w) / 2 : sidebarW + (width - sidebarW - w) / 2;
+  let y = isMobileScreen() ? 88 : max(92, (height - h) / 2);
 
   return { x: x, y: y, w: w, h: h };
+}
+
+function drawSelectedAppleReplay(d, miniW, miniH) {
+  if (!d || !Array.isArray(d.actions) || d.actions.length === 0) {
+    drawStaticMini(d, miniW, miniH);
+
+    if (d && d.dbId && !d.actions) {
+      noStroke();
+      fill(120, 112, 104, 120);
+      textAlign(CENTER, CENTER);
+      textSize(10);
+      text("loading drawing trace", miniW / 2, miniH - 14);
+    }
+    return;
+  }
+
+  let totalUnits = max(1, countDrawingUnits(d));
+  let replayDuration = constrain(totalUnits * 18, 4200, 14000);
+  let elapsed = (millis() - selectedAppleReplayStartedAt) % replayDuration;
+  let replayLimit = max(1, floor(map(elapsed, 0, replayDuration, 1, totalUnits)));
+
+  drawReplayMini(d, replayLimit, miniW, miniH, 1);
 }
 
 function getApplePopupCloseRect() {
@@ -1614,7 +1632,7 @@ function drawDrawingTitle() {
   textStyle(NORMAL);
   textSize(isMobileScreen() ? 26 : 34);
   drawingContext.letterSpacing = isMobileScreen() ? "1.2px" : "2.2px";
-  text("BEFORE I IMAGINE", width / 2, drawLayout.titleY);
+  text("Is This an Apple?", width / 2, drawLayout.titleY);
   drawingContext.letterSpacing = "0px";
 
   fill(92);
@@ -2895,6 +2913,7 @@ async function loadArchive() {
 function selectArchiveDrawing(index) {
   selectedAppleIndex = index;
   selectedApple = archive[index] || null;
+  selectedAppleReplayStartedAt = millis();
   fetchDrawingDetails(index);
 }
 
@@ -2918,6 +2937,7 @@ async function fetchDrawingDetails(index) {
 
     if (selectedAppleIndex === index) {
       selectedApple = archive[index];
+      selectedAppleReplayStartedAt = millis();
     }
   } catch (error) {
     console.warn("Could not load full drawing details:", error);
@@ -4316,13 +4336,21 @@ function countDrawingUnits(d) {
 
 function drawReplayMini(d, limit, miniW, miniH, alphaValue) {
   let g = createGraphics(miniW, miniH);
-  g.pixelDensity(pd);
+  g.pixelDensity(1);
   g.clear();
   g.smooth();
 
   renderDrawingToGraphics(g, d, limit, true, alphaValue);
 
   image(g, 0, 0);
+
+  try {
+    if (g && g.canvas && g.canvas.parentNode) {
+      g.canvas.parentNode.removeChild(g.canvas);
+    }
+  } catch (error) {
+    console.warn("Could not remove replay graphics canvas:", error);
+  }
 }
 
 function drawStaticMini(d, miniW, miniH) {
