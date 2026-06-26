@@ -175,6 +175,8 @@ function setup() {
   mainCanvas = createCanvas(windowWidth, windowHeight);
   if (mainCanvas && mainCanvas.elt) {
     mainCanvas.elt.style.userSelect = "none";
+    mainCanvas.elt.style.position = "relative";
+    mainCanvas.elt.style.zIndex = "1";
     mainCanvas.elt.addEventListener("dragstart", event => event.preventDefault());
   }
   updateHeaderHeight();
@@ -231,8 +233,10 @@ function createInterface() {
 
   sizeSlider = createSlider(1, 45, 5, 1);
   sizeSlider.size(120);
-  colorPicker.style("z-index", "20");
-  sizeSlider.style("z-index", "20");
+  colorPicker.style("z-index", "120");
+  sizeSlider.style("z-index", "120");
+  colorPicker.style("position", "absolute");
+  sizeSlider.style("position", "absolute");
   colorPicker.style("touch-action", "manipulation");
   sizeSlider.style("touch-action", "manipulation");
 
@@ -454,7 +458,9 @@ function styleButton(btn) {
   btn.style("white-space", "nowrap");
   btn.style("cursor", "pointer");
   btn.style("outline-color", "rgba(80, 72, 62, 0.35)");
-  btn.style("z-index", "20");
+  btn.style("position", "absolute");
+  btn.style("z-index", "120");
+  btn.style("pointer-events", "auto");
   btn.attribute("translate", "no");
   btn.style("touch-action", "manipulation");
 }
@@ -530,7 +536,7 @@ function sizeUndoButton(btn) {
   btn.style("border", "1px solid rgba(43, 41, 38, 0.45)");
   btn.style("background", "rgba(251, 250, 246, 0.72)");
   btn.style("color", "#2b2926");
-  btn.style("z-index", "60");
+  btn.style("z-index", "220");
   btn.style("pointer-events", "auto");
   btn.style("touch-action", "manipulation");
 }
@@ -722,21 +728,21 @@ function drawImmersiveDrawingPage() {
 
   drawPaperBackground();
   if (!isMobileScreen()) {
-    drawDrawPageSidebar();
-    drawBackgroundViewSwitcher();
     if (backgroundViewMode === "archive") {
       drawMemoryArchiveView();
       drawFloatingArchiveApples();
     } else {
       drawFloatingArchiveApples();
     }
-  } else if (mobileArchiveReady && !modalOpen) {
+    drawDrawPageSidebar();
     drawBackgroundViewSwitcher();
+  } else if (mobileArchiveReady && !modalOpen) {
     if (backgroundViewMode === "archive") {
       drawMobileArchiveView();
     } else {
       drawFloatingArchiveApples();
     }
+    drawBackgroundViewSwitcher();
   }
 
   if (modalOpen) {
@@ -1346,6 +1352,9 @@ function drawMemoryArchiveView() {
 function drawMobileArchiveView() {
   let pad = 22;
   let y = 86 - getMobileArchiveScrollY();
+  let cardW = min(width * 0.62, 240);
+  let cardH = 150;
+  let stepX = cardW * 0.72;
 
   noStroke();
   fill(48);
@@ -1386,19 +1395,17 @@ function drawMobileArchiveView() {
       continue;
     }
 
+    let rowPan = archiveRowPan[groupIndex] || 0;
     for (let i = 0; i < group.length; i++) {
       let item = group[i];
-      let cardW = min(width - pad * 2, 260);
-      let cardH = 150;
-      let cardX = (width - cardW) / 2 + ((i % 2) - 0.5) * 10;
-      let cardY = y - (i > 0 ? 18 : 0);
+      let cardX = pad + 8 + rowPan + i * stepX;
+      let cardY = y;
       let rotation = radians(((i % 5) - 2) * 1.2);
 
       drawMobileArchiveCard(item.drawing, item.index, cardX, cardY, cardW, cardH, rotation);
-      y = cardY + cardH + 12;
     }
 
-    y += 28;
+    y += cardH + 58;
   }
 }
 
@@ -1438,6 +1445,9 @@ function drawMobileArchiveCard(d, archiveIndex, x, y, w, h, rotation) {
 function getMobileArchiveCardAt(px, py) {
   let pad = 22;
   let y = 86 - getMobileArchiveScrollY() + 62;
+  let cardW = min(width * 0.62, 240);
+  let cardH = 150;
+  let stepX = cardW * 0.72;
 
   for (let groupIndex = 0; groupIndex < 4; groupIndex++) {
     let group = archive
@@ -1451,20 +1461,17 @@ function getMobileArchiveCardAt(px, py) {
       continue;
     }
 
+    let rowPan = archiveRowPan[groupIndex] || 0;
     for (let i = 0; i < group.length; i++) {
-      let cardW = min(width - pad * 2, 260);
-      let cardH = 150;
-      let cardX = (width - cardW) / 2 + ((i % 2) - 0.5) * 10;
-      let cardY = y - (i > 0 ? 18 : 0);
+      let cardX = pad + 8 + rowPan + i * stepX;
+      let cardY = y;
 
       if (px >= cardX && px <= cardX + cardW && py >= cardY && py <= cardY + cardH) {
         return group[i].index;
       }
-
-      y = cardY + cardH + 12;
     }
 
-    y += 28;
+    y += cardH + 58;
   }
 
   return -1;
@@ -1475,7 +1482,7 @@ function getMobileArchiveContentHeight() {
   for (let groupIndex = 0; groupIndex < 4; groupIndex++) {
     let count = archive.filter(d => getArchivePromptGroupIndex(d) === groupIndex).length;
     y += 24;
-    y += count > 0 ? count * 144 + 28 : 48;
+    y += count > 0 ? 208 : 48;
   }
   return y + 48;
 }
@@ -1824,7 +1831,8 @@ function touchStarted() {
         let handled = handlePointerPressed(x, y);
         return !handled;
       }
-      return true;
+      let handled = handlePointerPressed(x, y);
+      return !handled;
     }
 
     if (page === "draw") {
@@ -2248,6 +2256,18 @@ function getArchiveRowAt(x, y) {
   if (page !== "draw" || modalOpen || backgroundViewMode !== "archive") return -1;
   if (isClickOnSidebar(x, y) || isClickOnViewSwitcher(x, y) || isClickOnReopenDrawingButton(x, y)) return -1;
 
+  if (isMobileScreen()) {
+    let rowY = 86 - getMobileArchiveScrollY() + 62;
+    let cardH = 150;
+    for (let i = 0; i < 4; i++) {
+      rowY += 24;
+      let count = archive.filter(d => getArchivePromptGroupIndex(d) === i).length;
+      if (count > 0 && y >= rowY - 18 && y <= rowY + cardH + 18) return i;
+      rowY += count > 0 ? cardH + 58 : 48;
+    }
+    return -1;
+  }
+
   let top = getArchiveRowsTop();
   let gap = getArchiveRowGap();
   for (let i = 0; i < 4; i++) {
@@ -2263,6 +2283,15 @@ function constrainArchiveRowPan(rowIndex) {
 }
 
 function getArchiveRowPanBounds(rowIndex) {
+  if (isMobileScreen()) {
+    let count = archive.filter(d => getArchivePromptGroupIndex(d) === rowIndex).length;
+    let cardW = min(width * 0.62, 240);
+    let stepX = cardW * 0.72;
+    let contentW = count > 0 ? (count - 1) * stepX + cardW + 60 : width;
+    let minX = min(0, width - contentW - 30);
+    return { min: minX, max: 0 };
+  }
+
   let frame = getArchiveCardsSafeFrame();
   let rowCount = drawBackgroundApplesLayout.filter(item => item.rowIndex === rowIndex).length;
   let rowW = rowCount * 74 + 150;
@@ -2289,7 +2318,7 @@ function applyArchiveRowPanDelta(rowIndex, dx, withResistance) {
 }
 
 function updateArchiveRowInertia() {
-  if (isMobileScreen() || modalOpen || backgroundViewMode !== "archive") return;
+  if (modalOpen || backgroundViewMode !== "archive") return;
   if (archiveRowDragging) return;
 
   for (let i = 0; i < archiveRowVelocity.length; i++) {
@@ -2410,6 +2439,16 @@ function mouseWheel(event) {
     archiveSlicePanX -= event.delta;
     constrainArchiveSlicePan();
     return false;
+  }
+
+  if (page === "draw" && !modalOpen && backgroundViewMode === "archive") {
+    let row = getArchiveRowAt(mouseX, mouseY);
+    if (row >= 0) {
+      let delta = abs(event.deltaX || 0) > abs(event.deltaY || 0) ? event.deltaX : event.delta;
+      applyArchiveRowPanDelta(row, -delta, true);
+      archiveRowVelocity[row] = -delta * 0.18;
+      return false;
+    }
   }
 
   if (!archiveCanPan()) return;
