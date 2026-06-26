@@ -3067,4 +3067,1728 @@ function renderDrawingToOriginalGraphics(drawingData) {
 }
 
 function createDrawingPreviewDataURL(drawingData, previewW, previewH) {
-  let g = createGraphics<truncated__content/>
+  let g = createGraphics(previewW, previewH);
+  g.pixelDensity(1);
+  g.clear();
+  g.smooth();
+  renderDrawingToGraphics(g, drawingData, 999999, true, 1);
+
+  let dataURL = "";
+  try {
+    dataURL = g.canvas.toDataURL("image/webp", 0.72);
+  } catch (error) {
+    dataURL = "";
+  }
+
+  if (!dataURL || !dataURL.startsWith("data:image/webp")) {
+    dataURL = g.canvas.toDataURL("image/png");
+  }
+
+  try {
+    if (g && g.canvas && g.canvas.parentNode) {
+      g.canvas.parentNode.removeChild(g.canvas);
+    }
+  } catch (error) {
+    console.warn("Could not remove preview graphics canvas:", error);
+  }
+
+  return dataURL;
+}
+
+function hasPreviewData(d) {
+  return Boolean(
+    d &&
+    (
+      typeof d.thumb_url === "string" ||
+      typeof d.image_url === "string"
+    )
+  );
+}
+
+function hasLegacyPreviewData(d) {
+  return Boolean(d && typeof d.preview === "string" && d.preview.startsWith("data:image/"));
+}
+
+function getPreviewImage(d) {
+  if (!hasPreviewData(d)) return null;
+
+  let src = d.thumb_url || d.image_url;
+  let key = `${d.dbId || d.id || d.createdAt || archive.indexOf(d)}_${src}`;
+  let cache = imageURLCache;
+  let cached = cache[key];
+
+  if (cached) {
+    return cached.loaded ? cached.img : null;
+  }
+
+  let entry = {
+    img: null,
+    loaded: false,
+    failed: false
+  };
+  cache[key] = entry;
+
+  entry.img = loadImage(
+    src,
+    (img) => {
+      entry.img = img;
+      entry.loaded = true;
+    },
+    () => {
+      entry.failed = true;
+    }
+  );
+
+  return null;
+}
+
+async function backfillMissingPreviews() {
+  let updated = 0;
+  let skipped = 0;
+
+  for (let drawing of archive) {
+    if (!drawing || hasLegacyPreviewData(drawing)) {
+      skipped++;
+      continue;
+    }
+
+    if (!drawing.dbId) {
+      console.warn("Skipping drawing without dbId:", drawing.id || drawing.createdAt);
+      skipped++;
+      continue;
+    }
+
+    let preview = createDrawingPreviewDataURL(drawing, 260, 210);
+
+    try {
+      let response = await fetch(`/api/drawings/${drawing.dbId}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ preview })
+      });
+
+      if (!response.ok) {
+        throw new Error(await response.text());
+      }
+
+      drawing.preview = preview;
+      updated++;
+    } catch (error) {
+      console.warn("Could not backfill preview:", drawing.dbId, error);
+      skipped++;
+    }
+  }
+
+  saveArchive();
+  clearGridMiniCache();
+  generateDrawBackgroundApplesLayout();
+  console.log(`Preview backfill complete. Updated ${updated}, skipped ${skipped}.`);
+  return { updated, skipped };
+}
+
+window.backfillMissingPreviews = backfillMissingPreviews;
+
+async function backfillMissingImageUrls(batchSize = 5) {
+  let processed = 0;
+  let total = 0;
+
+  while (true) {
+    const response = await fetch(`/api/drawings/missing-images?limit=${batchSize}`);
+    if (!response.ok) {
+      throw new Error(await response.text());
+    }
+
+    const payload = await response.json();
+    const drawings = (Array.isArray(payload) ? payload : payload.drawings || [])
+      .map(normalizeDrawingData)
+      .filter(Boolean);
+    total = Array.isArray(payload) ? max(total, processed + drawings.length) : payload.total || 0;
+    if (drawings.length === 0) {
+      console.log(`Image URL backfill complete. Processed ${processed} drawings.`);
+      break;
+    }
+
+    for (let drawing of drawings) {
+      if (!drawing.dbId) {
+        console.warn("Skipping drawing without dbId:", drawing.id || drawing.createdAt);
+        continue;
+      }
+
+      let imageDataUrl = drawing.image_url
+        ? null
+        : createDrawingImageDataURL(drawing, drawing.canvasWidth || width, drawing.canvasHeight || height, 0.82);
+      let thumbDataUrl = drawing.thumb_url
+        ? null
+        : createDrawingImageDataURL(drawing, 320, 240, 0.72);
+
+      try {
+        const updateResponse = await fetch(`/api/drawings/${drawing.dbId}/images`, {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({ imageDataUrl, thumbDataUrl })
+        });
+
+        if (!updateResponse.ok) {
+          throw new Error(await updateResponse.text());
+        }
+
+        processed++;
+        console.log(`Image URL backfill: processed ${processed} / ${total}`);
+      } catch (error) {
+        console.warn("Could not backfill image URLs:", drawing.dbId, error);
+      }
+    }
+
+    if (drawings.length < batchSize) {
+      console.log(`Image URL backfill complete. Processed ${processed} drawings.`);
+      break;
+    }
+  }
+
+  return processed;
+}
+
+window.backfillMissingImageUrls = backfillMissingImageUrls;
+
+function refreshArchiveViews() {
+  clearGridMiniCache();
+  generateArchiveWallLayout();
+  calculateMaxLayerUnits();
+  generateLayerLayout();
+  generateDrawBackgroundApplesLayout();
+  if (page === "stack") selectFirstAvailableStackPrompt();
+  markStackDirty();
+}
+
+function normalizeDrawingData(d) {
+  if (typeof d === "string") {
+    try {
+      d = JSON.parse(d);
+    } catch (error) {
+      return null;
+    }
+  }
+
+  if (!d || typeof d !== "object") return null;
+
+  if (!d.actions && d.strokes) {
+    d.actions = [];
+
+    for (let s of d.strokes) {
+      let action = {
+        type: "stroke",
+        tool: "brush",
+        color: "#111111",
+        size: 4,
+        points: []
+      };
+
+      for (let p of s) {
+        action.points.push({
+          x: p.x,
+          y: p.y,
+          t: p.t || 0
+        });
+
+        if (p.color) action.color = p.color;
+        if (p.size) action.size = p.size;
+      }
+
+      d.actions.push(action);
+    }
+  }
+
+  if (!d.headerHeight) d.headerHeight = headerH;
+  if (!d.canvasWidth) d.canvasWidth = width;
+  if (!d.canvasHeight) d.canvasHeight = height;
+  if (d.promptIndex === null || d.promptIndex === "" || !Number.isFinite(Number(d.promptIndex))) {
+    let inferredPromptIndex = inferDrawingPromptIndex(d);
+    if (inferredPromptIndex !== null) d.promptIndex = inferredPromptIndex;
+  }
+
+  return d;
+}
+
+function inferDrawingPromptIndex(d) {
+  let text = [
+    d.promptEN,
+    d.promptCN,
+    d.prompt,
+    d.task,
+    d.category
+  ].filter(Boolean).join(" ").toLowerCase();
+
+  for (let i = 0; i < prompts.length; i++) {
+    if (
+      text.includes(prompts[i].en.toLowerCase()) ||
+      text.includes(prompts[i].cn) ||
+      text.includes(prompts[i].task.toLowerCase())
+    ) {
+      return i;
+    }
+  }
+
+  if (text.includes("touch") || text.includes("hand")) return 1;
+  if (text.includes("taste") || text.includes("mouth")) return 2;
+  if (text.includes("imperfect") || text.includes("not perfect")) return 3;
+  if (text.includes("default") || text.includes("first apple")) return 0;
+
+  return null;
+}
+
+function clearArchive() {
+  let confirmClear = confirm("Clear all saved drawings?");
+  if (!confirmClear) return;
+
+  archive = [];
+  localStorage.removeItem(storageKey);
+  clearGridMiniCache();
+
+  for (let key of oldStorageKeys) {
+    localStorage.removeItem(key);
+  }
+
+  refreshArchiveViews();
+}
+
+// -------------------------
+// ARCHIVE WALL
+// -------------------------
+
+function generateArchiveWallLayout() {
+  archiveWallLayout = [];
+
+  let header = archiveHeaderHeight();
+  let marginX = isMobileScreen() ? 34 : 82;
+  let availableW = width - marginX * 2;
+  let itemsPerRow = max(1, floor(availableW / (isMobileScreen() ? 140 : 188)));
+  itemsPerRow = min(itemsPerRow, max(1, archive.length));
+  let spacingY = isMobileScreen() ? 138 : 172;
+  let startY = header + (isMobileScreen() ? 54 : 68);
+  let rowCenters = [];
+
+  for (let i = 0; i < archive.length; i++) {
+    let row = floor(i / itemsPerRow);
+    if (!rowCenters[row]) rowCenters[row] = [];
+
+    let miniW = isMobileScreen() ? 118 : 150;
+    let miniH = isMobileScreen() ? 96 : 120;
+    let minCenterX = marginX + miniW * 0.48;
+    let maxCenterX = width - marginX - miniW * 0.48;
+    let centerX = random(minCenterX, maxCenterX);
+    let minDist = miniW * (isMobileScreen() ? 0.78 : 0.86);
+
+    for (let attempt = 0; attempt < 14; attempt++) {
+      let tooClose = false;
+      for (let placedX of rowCenters[row]) {
+        if (abs(centerX - placedX) < minDist) {
+          tooClose = true;
+          break;
+        }
+      }
+      if (!tooClose) break;
+      centerX = random(minCenterX, maxCenterX);
+    }
+    rowCenters[row].push(centerX);
+
+    let jitterY = random(isMobileScreen() ? -12 : -18, isMobileScreen() ? 12 : 18);
+
+    archiveWallLayout.push({
+      x: centerX - miniW / 2,
+      y: startY + row * spacingY + jitterY,
+      scale: 0.88 + ((i % 5) * 0.025),
+      alpha: 0.82 + ((i % 4) * 0.04),
+      replayIndex: 0,
+      replaySpeed: 0.62 + ((i % 4) * 0.1),
+      miniW: miniW,
+      miniH: miniH,
+      miniLayer: null,
+      lastDrawnIndex: 0
+    });
+  }
+}
+
+function getArchiveWallContentHeight() {
+  if (archive.length === 0) return height - archiveHeaderHeight() - 58;
+
+  let marginX = isMobileScreen() ? 34 : 82;
+  let availableW = width - marginX * 2;
+  let itemsPerRow = max(1, floor(availableW / (isMobileScreen() ? 140 : 188)));
+  itemsPerRow = min(itemsPerRow, max(1, archive.length));
+  let rows = ceil(archive.length / itemsPerRow);
+  let spacingY = isMobileScreen() ? 138 : 172;
+  let startY = isMobileScreen() ? 54 : 68;
+  let miniH = isMobileScreen() ? 96 : 120;
+
+  return startY + max(0, rows - 1) * spacingY + miniH + 82;
+}
+
+function generateLayerLayout() {
+  layerLayout = [];
+
+  let marginX = isMobileScreen() ? 38 : 86;
+  let availableW = max(160, width - marginX * 2);
+  let slotsPerRow = max(2, floor(availableW / (isMobileScreen() ? 96 : 150)));
+  slotsPerRow = min(slotsPerRow, max(1, archive.length));
+  let slotW = availableW / slotsPerRow;
+  let cellH = isMobileScreen() ? 148 : 184;
+  let startY = archiveHeaderHeight() + 76;
+  let baseScale = isMobileScreen() ? 0.7 : 0.84;
+  let rows = ceil(archive.length / slotsPerRow);
+  let slotOrders = [];
+
+  for (let row = 0; row < rows; row++) {
+    let order = [];
+    for (let slot = 0; slot < slotsPerRow; slot++) {
+      order.push(slot);
+    }
+    slotOrders.push(shuffle(order, false));
+  }
+
+  for (let i = 0; i < archive.length; i++) {
+    let row = floor(i / slotsPerRow);
+    let slotIndex = i % slotsPerRow;
+    let slot = slotOrders[row][slotIndex];
+    let jitterX = random(-slotW * 0.28, slotW * 0.28);
+    let jitterY = random(isMobileScreen() ? -26 : -34, isMobileScreen() ? 26 : 34);
+
+    layerLayout.push({
+      x: marginX + slotW * (slot + 0.5) + jitterX,
+      y: startY + row * cellH + jitterY,
+      scale: random(baseScale - 0.06, baseScale + 0.1),
+      rotation: random(-0.08, 0.08),
+      alpha: random(0.48, 0.72)
+    });
+  }
+}
+
+function getLayerContentHeight() {
+  if (archive.length === 0) return height - archiveHeaderHeight() - 58;
+
+  let marginX = isMobileScreen() ? 38 : 86;
+  let availableW = max(160, width - marginX * 2);
+  let slotsPerRow = max(2, floor(availableW / (isMobileScreen() ? 96 : 150)));
+  slotsPerRow = min(slotsPerRow, max(1, archive.length));
+  let cellH = isMobileScreen() ? 148 : 184;
+  let rows = ceil(archive.length / slotsPerRow);
+  let startY = 76;
+
+  return startY + max(0, rows - 1) * cellH + 190;
+}
+
+function drawArchiveWallPage() {
+  drawArchiveHeader(
+    "Archive of Remembered Apples",
+    "A zoomable memory field of remembered forms."
+  );
+
+  if (archive.length === 0) {
+    drawEmptyArchiveMessage();
+    return;
+  }
+
+  clipBelowHeader();
+  push();
+  applyWallCameraTransform();
+
+  for (let i = 0; i < archive.length; i++) {
+    let d = archive[i];
+    let layout = archiveWallLayout[i];
+    if (!layout) continue;
+
+    push();
+    translate(layout.x, layout.y);
+    scale(layout.scale);
+    tint(255, 245 * layout.alpha);
+    drawStaticMini(d, layout.miniW, layout.miniH);
+    noTint();
+    drawWallSemanticLabel(d, i, layout);
+    pop();
+  }
+
+  pop();
+  unclip();
+
+  drawArchiveWallDetailPopup();
+  drawArchiveFooter("Scroll or pinch to zoom. Drag to move through the remembered apple field.");
+}
+
+function applyWallCameraTransform() {
+  translate(width / 2, height / 2);
+  scale(wallCamera.zoom);
+  translate(-width / 2 + wallCamera.x, -height / 2 + wallCamera.y);
+}
+
+function screenToWall(x, y) {
+  return {
+    x: (x - width / 2) / wallCamera.zoom + width / 2 - wallCamera.x,
+    y: (y - height / 2) / wallCamera.zoom + height / 2 - wallCamera.y
+  };
+}
+
+function zoomWallCameraAt(screenX, screenY, zoomFactor) {
+  let before = screenToWall(screenX, screenY);
+  wallCamera.zoom = constrain(wallCamera.zoom * zoomFactor, wallMinZoom, wallMaxZoom);
+  let after = screenToWall(screenX, screenY);
+  wallCamera.x += after.x - before.x;
+  wallCamera.y += after.y - before.y;
+  constrainWallCamera();
+}
+
+function constrainWallCamera() {
+  let z = wallCamera.zoom;
+  let limitX = width * (0.55 + z * 0.45);
+  let limitY = height * (0.45 + z * 0.35);
+  wallCamera.x = constrain(wallCamera.x, -limitX, limitX);
+  wallCamera.y = constrain(wallCamera.y, -limitY, limitY);
+}
+
+function drawWallSemanticLabel(d, index, layout) {
+  if (wallCamera.zoom < 0.9) return;
+
+  noStroke();
+  fill(86, 78, 70, 145);
+  textAlign(LEFT);
+  textSize(10);
+  text(`#${index + 1}`, 4, layout.miniH + 14);
+
+  if (wallCamera.zoom >= 1.5) {
+    let promptLabel = getWallPromptShortLabel(getDrawingPromptIndex(d));
+    let duration = d.durationSeconds !== undefined ? `${d.durationSeconds}s` : "undated";
+    fill(86, 78, 70, 118);
+    textSize(8.5);
+    text(promptLabel, 4, layout.miniH + 28);
+    text(duration, 4, layout.miniH + 40);
+  }
+
+  if (wallCamera.zoom >= 2.0) {
+    fill(86, 78, 70, 105);
+    textSize(8.5);
+    text(`${countDrawingUnits(d)} trace units`, 4, layout.miniH + 52);
+  }
+}
+
+function getWallPromptShortLabel(promptKey) {
+  let labels = ["DEFAULT", "TOUCH", "TASTE", "IMPERFECT"];
+  let index = Number(promptKey);
+  if (!Number.isFinite(index) || index < 0 || index >= labels.length) return "MEMORY";
+  return labels[index];
+}
+
+function getArchiveWallAppleAt(screenX, screenY) {
+  let p = screenToWall(screenX, screenY);
+
+  for (let i = archiveWallLayout.length - 1; i >= 0; i--) {
+    let layout = archiveWallLayout[i];
+    if (!layout) continue;
+
+    let lx = (p.x - layout.x) / layout.scale;
+    let ly = (p.y - layout.y) / layout.scale;
+
+    if (lx >= 0 && lx <= layout.miniW && ly >= 0 && ly <= layout.miniH) {
+      return i;
+    }
+  }
+
+  return -1;
+}
+
+function drawArchiveWallDetailPopup() {
+  if (page !== "archiveWall" || !selectedApple) return;
+
+  let r = getArchiveWallPopupRect();
+
+  drawingContext.save();
+  drawingContext.shadowColor = "rgba(42, 35, 25, 0.13)";
+  drawingContext.shadowBlur = 22;
+  drawingContext.shadowOffsetY = 12;
+  noStroke();
+  fill(251, 250, 246, 236);
+  rect(r.x, r.y, r.w, r.h, 6);
+  drawingContext.restore();
+
+  let close = { x: r.x + r.w - 32, y: r.y + 18, w: 16, h: 16 };
+  stroke(inkCol);
+  strokeWeight(1.1);
+  line(close.x, close.y, close.x + close.w, close.y + close.h);
+  line(close.x + close.w, close.y, close.x, close.y + close.h);
+
+  noStroke();
+  fill(inkCol);
+  textAlign(LEFT);
+  textSize(13);
+  text(`#${selectedAppleIndex + 1}`, r.x + 18, r.y + 28);
+
+  fill(80);
+  textSize(10);
+  text(formatArchiveTime(selectedApple), r.x + 18, r.y + 48);
+  text(`${selectedApple.durationSeconds || 0}s · ${countDrawingUnits(selectedApple)} trace units`, r.x + 18, r.y + 65);
+
+  let thumbY = r.y + 82;
+  fill(paperCol);
+  stroke(226, 220, 210);
+  rect(r.x + 18, thumbY, r.w - 36, 120, 4);
+
+  push();
+  translate(r.x + 30, thumbY + 12);
+  drawStaticMini(selectedApple, r.w - 60, 96);
+  pop();
+
+  let promptKey = getDrawingPromptIndex(selectedApple);
+  let taskText = prompts[promptKey] ? prompts[promptKey].task : "TASK";
+  let titleText = prompts[promptKey] ? prompts[promptKey].shortTitle : "";
+  noStroke();
+  fill(inkCol);
+  textSize(10);
+  text(taskText, r.x + 18, thumbY + 148);
+  fill(82);
+  text(titleText, r.x + 18, thumbY + 168, r.w - 36);
+}
+
+// -------------------------
+// ARCHIVE GRID
+// -------------------------
+
+function drawArchiveGridPage() {
+  drawArchiveHeader(
+    "Archive of Remembered Apples",
+    "Drawings are gathered by sensory task."
+  );
+
+  if (archive.length === 0) {
+    drawEmptyArchiveMessage();
+    return;
+  }
+
+  let cardW = isMobileScreen() ? 150 : 210;
+  let cardH = isMobileScreen() ? 154 : 184;
+  let gap = isMobileScreen() ? 14 : 26;
+  let startX = isMobileScreen() ? 22 : 70;
+  let y = archiveHeaderHeight() + 38 + archivePan.y;
+
+  let cols = floor((width - startX * 2) / (cardW + gap));
+  cols = max(1, cols);
+
+  // 按 promptIndex 分组
+  let groups = {};
+
+  for (let d of archive) {
+    let key = d.promptIndex !== undefined ? d.promptIndex : "unknown";
+
+    if (!groups[key]) {
+      groups[key] = [];
+    }
+
+    groups[key].push(d);
+  }
+
+  let promptKeys = Object.keys(groups).sort((a, b) => Number(a) - Number(b));
+  let drawingNumber = 1;
+
+  clipBelowHeader();
+
+  for (let key of promptKeys) {
+    let group = groups[key];
+
+    if (y > archiveHeaderHeight() - 40 && y < height - 58) {
+      noStroke();
+      fill(45);
+      textAlign(LEFT);
+      textSize(isMobileScreen() ? 12 : 14);
+      text(getArchiveTaskTitle(key), startX, y);
+
+      fill(125);
+      textSize(10);
+      text(`${group.length} drawings`, startX, y + 18);
+    }
+
+    y += 38;
+
+    for (let i = 0; i < group.length; i++) {
+      let col = i % cols;
+      let row = floor(i / cols);
+
+      let x = startX + col * (cardW + gap);
+      let cardY = y + row * (cardH + gap);
+
+      if (cardY > height - 58 || cardY + cardH < archiveHeaderHeight()) continue;
+
+      let d = group[i];
+
+      fill(251, 250, 246, 230);
+      stroke(216, 208, 197);
+      strokeWeight(1);
+      rect(x, cardY, cardW, cardH, 3);
+
+      push();
+      translate(x + 13, cardY + 12);
+      drawStaticMini(d, cardW - 26, cardH - 64);
+      pop();
+
+      noStroke();
+      fill(88);
+      textAlign(LEFT);
+      textSize(10);
+      text(`#${drawingNumber}`, x + 13, cardY + cardH - 34);
+
+      fill(138);
+      textSize(9);
+      text(formatArchiveTime(d), x + 13, cardY + cardH - 17);
+
+      drawingNumber++;
+    }
+
+    let rowsUsed = ceil(group.length / cols);
+    y += rowsUsed * (cardH + gap) + 32;
+  }
+
+  unclip();
+
+  drawArchiveFooter("Drawings are grouped by sensory task, not by raw prompt text.");
+}
+
+function getArchiveGridContentHeight() {
+  if (archive.length === 0) return height - archiveHeaderHeight() - 58;
+
+  let cardW = isMobileScreen() ? 150 : 210;
+  let cardH = isMobileScreen() ? 154 : 184;
+  let gap = isMobileScreen() ? 14 : 26;
+  let startX = isMobileScreen() ? 22 : 70;
+  let cols = floor((width - startX * 2) / (cardW + gap));
+  cols = max(1, cols);
+  let groups = {};
+
+  for (let d of archive) {
+    let key = d.promptIndex !== undefined ? d.promptIndex : "unknown";
+    if (!groups[key]) groups[key] = [];
+    groups[key].push(d);
+  }
+
+  let promptKeys = Object.keys(groups).sort((a, b) => Number(a) - Number(b));
+  let totalH = 38;
+
+  for (let key of promptKeys) {
+    let rowsUsed = ceil(groups[key].length / cols);
+    totalH += 38 + rowsUsed * (cardH + gap) + 32;
+  }
+
+  return totalH + 40;
+}
+
+// -------------------------
+// LAYER VIEW
+// -------------------------
+
+function calculateMaxLayerUnits() {
+  maxLayerUnits = 0;
+
+  for (let d of archive) {
+    maxLayerUnits = max(maxLayerUnits, countDrawingUnits(d));
+  }
+}
+
+function drawLayerPage() {
+  drawArchiveHeader(
+    "Archive of Remembered Apples",
+    "Layer view gathers every remembered apple into one field."
+  );
+
+  if (archive.length === 0) {
+    drawEmptyArchiveMessage();
+    return;
+  }
+
+  if (layerLayout.length !== archive.length) {
+    generateLayerLayout();
+  }
+
+  clipBelowHeader();
+  push();
+  translate(archivePan.x, archivePan.y);
+
+  for (let i = 0; i < archive.length; i++) {
+    let d = archive[i];
+    let layout = layerLayout[i];
+    if (!layout) continue;
+
+    push();
+    translate(layout.x, layout.y);
+    rotate(layout.rotation);
+    scale(layout.scale);
+
+    drawReplayCentered(d, layerReplayIndex, layout.alpha);
+
+    pop();
+  }
+
+  pop();
+  unclip();
+
+  layerReplayIndex += 1.6;
+
+  if (layerReplayIndex > maxLayerUnits + 80) {
+    layerReplayIndex = 0;
+  }
+
+  drawArchiveFooter("Layer view lets individual traces overlap without flattening them into one image.");
+}
+
+// -------------------------
+// COLLECTIVE STACK VIEW
+// -------------------------
+
+function markStackDirty() {
+  stackDirty = true;
+}
+
+function getDrawingPromptIndex(drawing) {
+  let rawIndex = drawing && drawing.promptIndex;
+  if (rawIndex !== null && rawIndex !== "") {
+    let directIndex = Number(rawIndex);
+    if (Number.isFinite(directIndex) && directIndex >= 0 && directIndex < prompts.length) {
+      return directIndex;
+    }
+  }
+
+  return inferDrawingPromptIndex(drawing || {});
+}
+
+function getStackCategoryCounts() {
+  let counts = new Array(prompts.length).fill(0);
+
+  for (let drawing of archive) {
+    let index = getDrawingPromptIndex(drawing);
+    if (index !== null) counts[index]++;
+  }
+
+  return counts;
+}
+
+function selectFirstAvailableStackPrompt() {
+  let counts = getStackCategoryCounts();
+  if (counts[stackPromptIndex] > 0) return;
+
+  let firstAvailable = counts.findIndex(count => count > 0);
+  if (firstAvailable >= 0) stackPromptIndex = firstAvailable;
+}
+
+function getStackControlLayout() {
+  let outerMargin = isMobileScreen() ? 18 : 50;
+  let gap = isMobileScreen() ? 5 : 8;
+  let categoryY = archiveHeaderHeight() + 18;
+  let categoryH = isMobileScreen() ? 28 : 30;
+  let availableW = min(width - outerMargin * 2, isMobileScreen() ? width : 760);
+  let margin = (width - availableW) / 2;
+  let categoryW = (availableW - gap * (prompts.length - 1)) / prompts.length;
+  let countY = categoryY + categoryH + (isMobileScreen() ? 10 : 12);
+  let countW = isMobileScreen() ? 52 : 62;
+  let countH = 26;
+
+  let categories = [];
+  for (let i = 0; i < prompts.length; i++) {
+    categories.push({
+      x: margin + i * (categoryW + gap),
+      y: categoryY,
+      w: categoryW,
+      h: categoryH,
+      value: i
+    });
+  }
+
+  let counts = [];
+  let countValues = [10, 30, "all"];
+  for (let i = 0; i < countValues.length; i++) {
+    counts.push({
+      x: margin + i * (countW + gap),
+      y: countY,
+      w: countW,
+      h: countH,
+      value: countValues[i]
+    });
+  }
+
+  return {
+    margin: margin,
+    categories: categories,
+    counts: counts,
+    stackY: countY + countH + (isMobileScreen() ? 14 : 18)
+  };
+}
+
+function handleStackControlPress(x, y) {
+  if (page !== "stack") return false;
+
+  let controls = getStackControlLayout();
+
+  for (let item of controls.categories) {
+    if (pointInsideRect(x, y, item)) {
+      if (stackPromptIndex !== item.value) {
+        stackPromptIndex = item.value;
+        markStackDirty();
+      }
+      return true;
+    }
+  }
+
+  for (let item of controls.counts) {
+    if (pointInsideRect(x, y, item)) {
+      if (stackCountMode !== item.value) {
+        stackCountMode = item.value;
+        markStackDirty();
+      }
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function pointInsideRect(x, y, rectData) {
+  return (
+    x >= rectData.x &&
+    x <= rectData.x + rectData.w &&
+    y >= rectData.y &&
+    y <= rectData.y + rectData.h
+  );
+}
+
+function drawStackPage() {
+  drawArchiveHeader(
+    "Archive of Remembered Apples",
+    "Collective Stack compares one sensory task at a time."
+  );
+
+  drawStackControls();
+
+  let frame = getStackFrame();
+  if (
+    stackDirty ||
+    !stackBuffer ||
+    stackBuffer.width !== floor(frame.w) ||
+    stackBuffer.height !== floor(frame.h)
+  ) {
+    generateStackBuffer(frame.w, frame.h);
+  }
+
+  noStroke();
+  fill(paperCol);
+  rect(frame.x, frame.y, frame.w, frame.h, 4);
+  stroke(205, 197, 186);
+  strokeWeight(1);
+  noFill();
+  rect(frame.x, frame.y, frame.w, frame.h, 4);
+
+  if (stackRenderedCount > 0 && stackBuffer) {
+    image(stackBuffer, frame.x, frame.y, frame.w, frame.h);
+  } else {
+    noStroke();
+    fill(124);
+    textAlign(CENTER);
+    textSize(isMobileScreen() ? 12 : 14);
+    text("No drawings saved for this task.", width / 2, frame.y + frame.h / 2);
+  }
+
+  let selectedTitle = getArchiveTaskTitle(stackPromptIndex).split(" — ")[0];
+  drawArchiveFooter(
+    `${stackRenderedCount} drawings overlaid / ${selectedTitle}`
+  );
+}
+
+function drawStackControls() {
+  let controls = getStackControlLayout();
+  let categoryLabels = ["DEFAULT", "TOUCH", "TASTE", "IMPERFECT"];
+  let categoryCounts = getStackCategoryCounts();
+
+  for (let item of controls.categories) {
+    let active = stackPromptIndex === item.value;
+    stroke(active ? 45 : 160);
+    strokeWeight(1);
+    fill(active ? 45 : color(bgCol));
+    rect(item.x, item.y, item.w, item.h, 2);
+
+    noStroke();
+    fill(active ? 250 : 82);
+    textAlign(CENTER, CENTER);
+    textSize(isMobileScreen() ? 9 : 11);
+    text(
+      `${categoryLabels[item.value]} ${categoryCounts[item.value]}`,
+      item.x + item.w / 2,
+      item.y + item.h / 2 + 1
+    );
+  }
+
+  noStroke();
+  fill(112);
+  textAlign(RIGHT, CENTER);
+  textSize(10);
+  let labelX = width - controls.margin;
+  let countY = controls.counts[0].y + controls.counts[0].h / 2;
+  text("RECENT", labelX, countY);
+
+  for (let item of controls.counts) {
+    let active = stackCountMode === item.value;
+    stroke(active ? 55 : 174);
+    strokeWeight(1);
+    fill(active ? 55 : color(bgCol));
+    rect(item.x, item.y, item.w, item.h, 2);
+
+    noStroke();
+    fill(active ? 250 : 92);
+    textAlign(CENTER, CENTER);
+    textSize(10);
+    text(item.value === "all" ? "ALL" : String(item.value), item.x + item.w / 2, item.y + item.h / 2 + 1);
+  }
+}
+
+function getStackFrame() {
+  let controls = getStackControlLayout();
+  let marginX = isMobileScreen() ? 18 : max(70, width * 0.12);
+  let bottom = height - 72;
+
+  return {
+    x: marginX,
+    y: controls.stackY,
+    w: max(120, width - marginX * 2),
+    h: max(90, bottom - controls.stackY)
+  };
+}
+
+function generateStackBuffer(bufferW, bufferH) {
+  let w = max(1, floor(bufferW));
+  let h = max(1, floor(bufferH));
+
+  if (stackBuffer) {
+    stackBuffer.remove();
+  }
+  stackBuffer = createGraphics(w, h);
+  stackBuffer.pixelDensity(pd);
+  stackBuffer.clear();
+  stackBuffer.smooth();
+
+  let matching = archive
+    .filter(d => getDrawingPromptIndex(d) === stackPromptIndex)
+    .slice()
+    .sort((a, b) => {
+      let aTime = a.createdAt ? new Date(a.createdAt).getTime() : Number(a.id) || 0;
+      let bTime = b.createdAt ? new Date(b.createdAt).getTime() : Number(b.id) || 0;
+      return bTime - aTime;
+    });
+
+  // "All" is capped to protect mobile performance. Raise this value if needed.
+  let limit = stackCountMode === "all" ? 100 : stackCountMode;
+  let selected = matching.slice(0, limit);
+  stackRenderedCount = selected.length;
+
+  if (selected.length === 0) {
+    stackDirty = false;
+    return;
+  }
+
+  let drawingBuffer = createGraphics(w, h);
+  drawingBuffer.pixelDensity(pd);
+  drawingBuffer.smooth();
+
+  let opacity = constrain(map(selected.length, 1, 100, 0.15, 0.08), 0.08, 0.15);
+
+  for (let drawing of selected) {
+    drawingBuffer.clear();
+    renderNormalizedDrawingForStack(drawingBuffer, drawing);
+
+    stackBuffer.drawingContext.save();
+    stackBuffer.drawingContext.globalAlpha = opacity;
+    stackBuffer.image(drawingBuffer, 0, 0);
+    stackBuffer.drawingContext.restore();
+  }
+
+  drawingBuffer.remove();
+  stackDirty = false;
+}
+
+function renderNormalizedDrawingForStack(g, drawing) {
+  // Stored action geometry represents the non-transparent drawn content, so it
+  // provides the same useful crop bounds without scanning every source pixel.
+  let bounds = getDrawingBounds(drawing);
+  let contentW = max(1, bounds.maxX - bounds.minX);
+  let contentH = max(1, bounds.maxY - bounds.minY);
+  let targetW = g.width * (isMobileScreen() ? 0.82 : 0.76);
+  let targetH = g.height * 0.78;
+  let scaleFactor = min(targetW / contentW, targetH / contentH);
+  let offsetX = (g.width - contentW * scaleFactor) / 2;
+  let offsetY = (g.height - contentH * scaleFactor) / 2;
+  let acts = drawing.actions || [];
+
+  for (let action of acts) {
+    if (action.type === "stroke") {
+      let pts = action.points || [];
+
+      if (action.tool === "eraser") {
+        g.erase();
+        g.stroke(0);
+      } else {
+        g.noErase();
+        g.stroke(action.color || "#111111");
+      }
+
+      g.strokeWeight(max(0.8, action.size * scaleFactor));
+      g.strokeCap(ROUND);
+      g.strokeJoin(ROUND);
+
+      if (pts.length === 1) {
+        let p = mapPointToStack(pts[0], bounds, scaleFactor, offsetX, offsetY);
+        g.noStroke();
+        g.fill(action.tool === "eraser" ? 0 : action.color || "#111111");
+        g.circle(p.x, p.y, max(1, action.size * scaleFactor));
+      }
+
+      for (let i = 1; i < pts.length; i++) {
+        let p1 = mapPointToStack(pts[i - 1], bounds, scaleFactor, offsetX, offsetY);
+        let p2 = mapPointToStack(pts[i], bounds, scaleFactor, offsetX, offsetY);
+        g.line(p1.x, p1.y, p2.x, p2.y);
+      }
+
+      g.noErase();
+    } else if (action.type === "fill") {
+      // Fill actions store a point but not their original contour. Keep them as
+      // a quiet mark so a large flood fill cannot flatten the collective trace.
+      let p = mapPointToStack(action, bounds, scaleFactor, offsetX, offsetY);
+      g.noStroke();
+      g.fill(action.color || "#111111");
+      g.circle(p.x, p.y, constrain(24 * scaleFactor, 10, 48));
+    }
+  }
+}
+
+function mapPointToStack(p, bounds, scaleFactor, offsetX, offsetY) {
+  return {
+    x: (p.x - bounds.minX) * scaleFactor + offsetX,
+    y: (p.y - bounds.minY) * scaleFactor + offsetY
+  };
+}
+
+// -------------------------
+// REPLAY RENDERING
+// -------------------------
+
+function updateMiniReplayLayer(d, layout) {
+  let targetIndex = floor(layout.replayIndex);
+
+  // 如果播放重置了，清空小画布
+  if (targetIndex < layout.lastDrawnIndex) {
+    layout.miniLayer.clear();
+    layout.lastDrawnIndex = 0;
+  }
+
+  // 一次只补画新增的部分，不要每帧从头重画
+  renderDrawingRangeToGraphics(
+    layout.miniLayer,
+    d,
+    layout.lastDrawnIndex,
+    targetIndex,
+    true,
+    layout.alpha
+  );
+
+  layout.lastDrawnIndex = targetIndex;
+}
+function countDrawingUnits(d) {
+  let count = 0;
+  let acts = d.actions || [];
+
+  for (let a of acts) {
+    if (a.type === "stroke") {
+      count += max(1, (a.points || []).length);
+    } else if (a.type === "fill") {
+      count += 8;
+    }
+  }
+
+  return count;
+}
+
+function drawReplayMini(d, limit, miniW, miniH, alphaValue) {
+  let g = createGraphics(miniW, miniH);
+  g.pixelDensity(pd);
+  g.clear();
+  g.smooth();
+
+  renderDrawingToGraphics(g, d, limit, true, alphaValue);
+
+  image(g, 0, 0);
+}
+
+function drawStaticMini(d, miniW, miniH) {
+  let preview = getPreviewImage(d);
+  if (preview) {
+    image(preview, 0, 0, miniW, miniH);
+    return;
+  }
+
+  drawMissingImagePlaceholder(miniW, miniH);
+}
+
+function drawMissingImagePlaceholder(w, h) {
+  push();
+  noStroke();
+  fill(248, 244, 236, 150);
+  rect(0, 0, w, h, 6);
+  stroke(210, 202, 190, 150);
+  strokeWeight(1);
+  noFill();
+  rect(0.5, 0.5, w - 1, h - 1, 6);
+  noStroke();
+  fill(120, 112, 104, 140);
+  textAlign(CENTER, CENTER);
+  textSize(constrain(w * 0.08, 8, 12));
+  text("image pending", w / 2, h / 2);
+  pop();
+}
+
+function getCachedStaticMini(d, miniW, miniH) {
+  return null;
+}
+
+function clearGridMiniCache() {
+  gridMiniCache = {};
+}
+
+function resetArchivePan() {
+  archivePan = { x: 0, y: 0 };
+  isArchivePanning = false;
+  constrainArchivePan();
+}
+
+function drawReplayCentered(d, limit, alphaValue) {
+  let bounds = getDrawingBounds(d);
+
+  let contentW = bounds.maxX - bounds.minX;
+  let contentH = bounds.maxY - bounds.minY;
+
+  let targetW = 180;
+  let targetH = 150;
+
+  let scaleFactor = min(targetW / contentW, targetH / contentH);
+
+  let acts = d.actions || [];
+  let used = 0;
+
+  for (let a of acts) {
+    if (used >= limit) break;
+
+    if (a.type === "stroke") {
+      let pts = a.points || [];
+
+      for (let i = 1; i < pts.length; i++) {
+        if (used >= limit) break;
+
+        let p1 = mapPointToCenteredLayer(pts[i - 1], bounds, scaleFactor);
+        let p2 = mapPointToCenteredLayer(pts[i], bounds, scaleFactor);
+
+        if (a.tool === "eraser") {
+          stroke(red(color(paperCol)), green(color(paperCol)), blue(color(paperCol)), 180);
+          strokeWeight(max(2, a.size * 0.8));
+        } else {
+          let c = color(a.color || "#111111");
+          c.setAlpha(255 * alphaValue);
+          stroke(c);
+          strokeWeight(max(0.8, a.size * 0.5));
+        }
+
+        strokeCap(ROUND);
+        strokeJoin(ROUND);
+        line(p1.x, p1.y, p2.x, p2.y);
+
+        used++;
+      }
+    } else if (a.type === "fill") {
+      if (used < limit) {
+        let p = mapPointToCenteredLayer(a, bounds, scaleFactor);
+        let c = color(a.color);
+        c.setAlpha(90 * alphaValue);
+        noStroke();
+        fill(c);
+        ellipse(p.x, p.y, 80, 70);
+        used += 8;
+      }
+    }
+  }
+}
+
+function mapPointToCenteredLayer(p, bounds, scaleFactor) {
+  let contentW = bounds.maxX - bounds.minX;
+  let contentH = bounds.maxY - bounds.minY;
+
+  return {
+    x: (p.x - bounds.minX - contentW / 2) * scaleFactor,
+    y: (p.y - bounds.minY - contentH / 2) * scaleFactor
+  };
+}
+
+function renderDrawingToGraphics(g, d, limit, includeFills, alphaValue) {
+  let acts = d.actions || [];
+  let used = 0;
+
+  for (let a of acts) {
+    if (used >= limit) break;
+
+    if (a.type === "stroke") {
+      let pts = a.points || [];
+
+      if (pts.length === 1 && used < limit) {
+        let p = mapPointToMini(pts[0], d, g.width, g.height);
+        drawMiniDot(g, a, p, alphaValue);
+        used++;
+      }
+
+      for (let i = 1; i < pts.length; i++) {
+        if (used >= limit) break;
+
+        let p1 = mapPointToMini(pts[i - 1], d, g.width, g.height);
+        let p2 = mapPointToMini(pts[i], d, g.width, g.height);
+
+        if (a.tool === "eraser") {
+          g.erase();
+          g.stroke(0);
+          g.strokeWeight(max(1, a.size * 0.32));
+          g.strokeCap(ROUND);
+          g.strokeJoin(ROUND);
+          g.line(p1.x, p1.y, p2.x, p2.y);
+          g.noErase();
+        } else {
+          let c = color(a.color || "#111111");
+          c.setAlpha(220 * alphaValue);
+          g.stroke(c);
+          g.strokeWeight(max(0.7, a.size * 0.25));
+          g.strokeCap(ROUND);
+          g.strokeJoin(ROUND);
+          g.line(p1.x, p1.y, p2.x, p2.y);
+        }
+
+        used++;
+      }
+    } else if (a.type === "fill" && includeFills) {
+      if (used < limit) {
+        let p = mapPointToMini(a, d, g.width, g.height);
+
+        floodFillOnGraphics(
+          g,
+          floor(p.x),
+          floor(p.y),
+          a.color,
+          0,
+          0,
+          g.width - 1,
+          g.height - 1
+        );
+
+        used += 8;
+      }
+    }
+  }
+}
+
+function renderDrawingRangeToGraphics(g, d, fromLimit, toLimit, includeFills, alphaValue) {
+  let acts = d.actions || [];
+  let used = 0;
+
+  for (let a of acts) {
+    if (used >= toLimit) break;
+
+    if (a.type === "stroke") {
+      let pts = a.points || [];
+
+      if (pts.length === 1) {
+        if (used >= fromLimit && used < toLimit) {
+          let p = mapPointToMini(pts[0], d, g.width, g.height);
+          drawMiniDot(g, a, p, alphaValue);
+        }
+        used++;
+      }
+
+      for (let i = 1; i < pts.length; i++) {
+        if (used >= toLimit) break;
+
+        if (used >= fromLimit) {
+          let p1 = mapPointToMini(pts[i - 1], d, g.width, g.height);
+          let p2 = mapPointToMini(pts[i], d, g.width, g.height);
+
+          if (a.tool === "eraser") {
+            g.stroke(paperCol);
+            g.strokeWeight(max(1, a.size * 0.45));
+            g.strokeCap(ROUND);
+            g.strokeJoin(ROUND);
+            g.line(p1.x, p1.y, p2.x, p2.y);
+          } else {
+            let c = color(a.color || "#111111");
+            c.setAlpha(220 * alphaValue);
+            g.stroke(c);
+            g.strokeWeight(max(0.7, a.size * 0.25));
+            g.strokeCap(ROUND);
+            g.strokeJoin(ROUND);
+            g.line(p1.x, p1.y, p2.x, p2.y);
+          }
+        }
+
+        used++;
+      }
+    } else if (a.type === "fill" && includeFills) {
+      if (used >= fromLimit && used < toLimit) {
+        let p = mapPointToMini(a, d, g.width, g.height);
+
+        floodFillOnGraphics(
+          g,
+          floor(p.x),
+          floor(p.y),
+          a.color,
+          0,
+          0,
+          g.width - 1,
+          g.height - 1
+        );
+      }
+
+      used += 8;
+    }
+  }
+}
+
+function drawMiniDot(g, action, p, alphaValue) {
+  if (action.tool === "eraser") {
+    g.noStroke();
+    g.fill(paperCol);
+    g.circle(p.x, p.y, max(2, action.size * 0.7));
+  } else {
+    let c = color(action.color || "#111111");
+    c.setAlpha(220 * alphaValue);
+    g.noStroke();
+    g.fill(c);
+    g.circle(p.x, p.y, max(1, action.size * 0.3));
+  }
+}
+
+function drawReplayDirect(d, limit, alphaValue) {
+  let acts = d.actions || [];
+  let used = 0;
+
+  for (let a of acts) {
+    if (used >= limit) break;
+
+    if (a.type === "stroke") {
+      let pts = a.points || [];
+
+      if (pts.length === 1 && used < limit) {
+        let p = mapPointToLayer(pts[0], d);
+        drawLayerDot(a, p, alphaValue);
+        used++;
+      }
+
+      for (let i = 1; i < pts.length; i++) {
+        if (used >= limit) break;
+
+        let p1 = mapPointToLayer(pts[i - 1], d);
+        let p2 = mapPointToLayer(pts[i], d);
+
+        if (a.tool === "eraser") {
+          stroke(red(color(paperCol)), green(color(paperCol)), blue(color(paperCol)), 160);
+          strokeWeight(max(2, a.size * 1.1));
+        } else {
+          let c = color(a.color || "#111111");
+          c.setAlpha(255 * alphaValue);
+          stroke(c);
+          strokeWeight(max(0.8, a.size * 0.6));
+        }
+
+        strokeCap(ROUND);
+        strokeJoin(ROUND);
+        line(p1.x, p1.y, p2.x, p2.y);
+
+        used++;
+      }
+    } else if (a.type === "fill") {
+      if (used < limit) {
+        let p = mapPointToLayer(a, d);
+        let c = color(a.color);
+        c.setAlpha(60);
+        noStroke();
+        fill(c);
+        ellipse(p.x, p.y, 70, 70);
+        used += 8;
+      }
+    }
+  }
+}
+
+function drawLayerDot(action, p, alphaValue) {
+  if (action.tool === "eraser") {
+    noStroke();
+    fill(red(color(paperCol)), green(color(paperCol)), blue(color(paperCol)), 160);
+    circle(p.x, p.y, max(2, action.size * 1.2));
+  } else {
+    let c = color(action.color || "#111111");
+    c.setAlpha(255 * alphaValue);
+    noStroke();
+    fill(c);
+    circle(p.x, p.y, max(1, action.size * 0.8));
+  }
+}
+
+function getDrawingBounds(d) {
+  let originalW = d.canvasWidth || width;
+  let originalH = d.canvasHeight || height;
+  let originalHeaderH = d.headerHeight || headerH;
+
+  let minX = originalW;
+  let maxX = 0;
+  let minY = originalH;
+  let maxY = originalHeaderH;
+
+  let hasPoint = false;
+  let acts = d.actions || [];
+
+  for (let a of acts) {
+    if (a.type === "stroke") {
+      let pts = a.points || [];
+
+      for (let p of pts) {
+        minX = min(minX, p.x);
+        maxX = max(maxX, p.x);
+        minY = min(minY, p.y);
+        maxY = max(maxY, p.y);
+        hasPoint = true;
+      }
+    } else if (a.type === "fill") {
+      minX = min(minX, a.x);
+      maxX = max(maxX, a.x);
+      minY = min(minY, a.y);
+      maxY = max(maxY, a.y);
+      hasPoint = true;
+    }
+  }
+
+  // 如果没有点，就退回整个绘画区域
+  if (!hasPoint) {
+    return {
+      minX: 0,
+      maxX: originalW,
+      minY: originalHeaderH,
+      maxY: originalH
+    };
+  }
+
+  // 给图像周围留一点呼吸空间，不要贴边
+  let padding = 45;
+
+  minX = max(0, minX - padding);
+  maxX = min(originalW, maxX + padding);
+  minY = max(originalHeaderH, minY - padding);
+  maxY = min(originalH, maxY + padding);
+
+  // 防止只画了一个小点时尺寸太小
+  if (maxX - minX < 80) {
+    let cx = (minX + maxX) / 2;
+    minX = max(0, cx - 40);
+    maxX = min(originalW, cx + 40);
+  }
+
+  if (maxY - minY < 80) {
+    let cy = (minY + maxY) / 2;
+    minY = max(originalHeaderH, cy - 40);
+    maxY = min(originalH, cy + 40);
+  }
+
+  return {
+    minX: minX,
+    maxX: maxX,
+    minY: minY,
+    maxY: maxY
+  };
+}
+
+function mapPointToMini(p, d, miniW, miniH) {
+  let bounds = getDrawingBounds(d);
+
+  let contentW = bounds.maxX - bounds.minX;
+  let contentH = bounds.maxY - bounds.minY;
+
+  // 等比例缩放图像本身，不拉伸
+  let scaleFactor = min(miniW / contentW, miniH / contentH);
+
+  // 居中
+  let offsetX = (miniW - contentW * scaleFactor) / 2;
+  let offsetY = (miniH - contentH * scaleFactor) / 2;
+
+  return {
+    x: (p.x - bounds.minX) * scaleFactor + offsetX,
+    y: (p.y - bounds.minY) * scaleFactor + offsetY
+  };
+}
+
+function mapPointToLayer(p, d) {
+  let originalW = d.canvasWidth || width;
+  let originalH = d.canvasHeight || height;
+  let originalHeaderH = d.headerHeight || headerH;
+
+  return {
+    x: map(p.x, 0, originalW, 0, width),
+    y: map(p.y, originalHeaderH, originalH, 0, height - headerH)
+  };
+}
+
+// -------------------------
+// ARCHIVE UI
+// -------------------------
+
+function drawArchiveHeader(title, subtitle) {
+  noStroke();
+  fill(bgCol);
+  rect(0, 0, width, archiveHeaderHeight());
+
+  fill(inkCol);
+  textAlign(LEFT);
+  textStyle(NORMAL);
+  textSize(isMobileScreen() ? 20 : 27);
+  drawingContext.letterSpacing = isMobileScreen() ? "1px" : "2px";
+  text(title.toUpperCase(), isMobileScreen() ? 22 : 50, isMobileScreen() ? 42 : 54);
+  drawingContext.letterSpacing = "0px";
+
+  textSize(isMobileScreen() ? 12 : 14);
+  fill(mutedCol);
+  text(subtitle, isMobileScreen() ? 22 : 50, isMobileScreen() ? 68 : 80);
+
+  textAlign(RIGHT);
+  textSize(11);
+  fill(128);
+  text(`${archive.length} drawings`, width - (isMobileScreen() ? 22 : 50), isMobileScreen() ? 68 : 80);
+}
+
+function drawArchiveFooter(msg) {
+  noStroke();
+  fill(bgCol);
+  rect(0, height - 58, width, 58);
+
+  fill(112);
+  textSize(isMobileScreen() ? 11 : 12);
+  textAlign(CENTER);
+  text(msg, width / 2, height - 27);
+}
+
+function drawEmptyArchiveMessage() {
+  fill(120);
+  noStroke();
+  textAlign(CENTER);
+  textSize(16);
+  text("No drawings saved yet.", width / 2, archiveHeaderHeight() + 90);
+}
+
+function clipBelowHeader() {
+  let top = archiveHeaderHeight();
+  drawingContext.save();
+  drawingContext.beginPath();
+  drawingContext.rect(0, top, width, height - top - 58);
+  drawingContext.clip();
+}
+
+function unclip() {
+  drawingContext.restore();
+}
+
+function clipRect(x, y, w, h) {
+  drawingContext.save();
+  drawingContext.beginPath();
+  drawingContext.rect(x, y, w, h);
+  drawingContext.clip();
+}
+
+function archiveHeaderHeight() {
+  return isMobileScreen() ? 130 : 124;
+}
+
+function getArchiveTaskTitle(key) {
+  let index = Number(key);
+  if (!Number.isFinite(index) || index < 0 || index >= archiveTaskTitles.length) {
+    return "UNASSIGNED MEMORY — Remembered apple";
+  }
+  return archiveTaskTitles[index];
+}
+
+function formatArchiveTime(d) {
+  let date = d.createdAt ? new Date(d.createdAt) : null;
+  let dateText = date && !isNaN(date.getTime())
+    ? `${String(date.getMonth() + 1).padStart(2, "0")}.${String(date.getDate()).padStart(2, "0")} ${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`
+    : "undated";
+  let duration = d.durationSeconds !== undefined ? ` / ${d.durationSeconds}s` : "";
+  return `${dateText}${duration}`;
+}
+
+function drawWallHoverLabel(d, index, layout) {
+  let localX = (mouseX - archivePan.x - layout.x) / layout.scale;
+  let localY = (mouseY - archivePan.y - layout.y) / layout.scale;
+  if (localX < 0 || localX > layout.miniW || localY < 0 || localY > layout.miniH) return;
+
+  noStroke();
+  fill(251, 250, 246, 238);
+  rect(0, layout.miniH + 8, 118, 34, 2);
+  fill(82);
+  textAlign(LEFT);
+  textSize(9);
+  text(`#${index + 1}`, 8, layout.miniH + 21);
+  text(getArchiveTaskTitle(d.promptIndex).split(" — ")[0], 8, layout.miniH + 33);
+}
+
+function shortenText(str, maxLen) {
+  if (!str) return "";
+  if (str.length <= maxLen) return str;
+  return str.substring(0, maxLen) + "...";
+}
+
+// -------------------------
+// EXPORT DATA
+// -------------------------
+
+function exportArchiveJSON() {
+  if (archive.length === 0) {
+    alert("No data to export.");
+    return;
+  }
+
+  let data = JSON.stringify(archive, null, 2);
+  let blob = new Blob([data], { type: "application/json" });
+  let url = URL.createObjectURL(blob);
+
+  let a = document.createElement("a");
+  a.href = url;
+  a.download = "before-i-imagine-prompt-test-data.json";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+
+  URL.revokeObjectURL(url);
+}
+
+// -------------------------
+// RESIZE
+// -------------------------
+
+function windowResized() {
+  resizeCanvas(windowWidth, windowHeight);
+  updateHeaderHeight();
+
+  let oldLayer = drawingLayer;
+  drawingLayer = createGraphics(width, height);
+  drawingLayer.pixelDensity(pd);
+  drawingLayer.clear();
+  drawingLayer.smooth();
+  drawingLayer.image(oldLayer, 0, 0);
+
+  layoutInterface();
+  clearGridMiniCache();
+  resetArchivePan();
+  generateArchiveWallLayout();
+  calculateMaxLayerUnits();
+  generateLayerLayout();
+  generateDrawBackgroundApplesLayout();
+  markStackDirty();
+}
