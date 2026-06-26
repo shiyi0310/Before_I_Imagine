@@ -123,8 +123,11 @@ let archiveRowPan = [0, 0, 0, 0];
 let archiveRowDragging = false;
 let archiveRowDragIndex = -1;
 let archiveRowLastX = 0;
+let archiveRowLastMoveTime = 0;
 let archiveRowPressPoint = { x: 0, y: 0 };
 let archiveRowDragDistance = 0;
+let archiveRowVelocity = [0, 0, 0, 0];
+let archiveScrollModeActive = false;
 let layerReplayIndex = 0;
 let maxLayerUnits = 0;
 let stackBuffer = null;
@@ -151,6 +154,7 @@ let isArchivePanning = false;
 let lastPanPoint = { x: 0, y: 0 };
 
 let pd = 1;
+let mainCanvas;
 
 function setup() {
   document.body.style.margin = "0";
@@ -161,11 +165,17 @@ function setup() {
   document.body.style.touchAction = "none";
   document.body.style.fontFamily = interfaceFont;
   document.body.style.fontWeight = "400";
+  document.body.style.userSelect = "none";
+  document.body.style.webkitUserSelect = "none";
 
   pd = min(displayDensity(), 2);
   pixelDensity(pd);
 
-  createCanvas(windowWidth, windowHeight);
+  mainCanvas = createCanvas(windowWidth, windowHeight);
+  if (mainCanvas && mainCanvas.elt) {
+    mainCanvas.elt.style.userSelect = "none";
+    mainCanvas.elt.addEventListener("dragstart", event => event.preventDefault());
+  }
   updateHeaderHeight();
   smooth();
 
@@ -190,6 +200,8 @@ function setup() {
 function draw() {
   background(bgCol);
   applyCanvasTypography();
+  updateMobileArchiveScrollMode();
+  updateArchiveRowInertia();
   archiveTargetTransition = (!modalOpen && backgroundViewMode === "archive") ? 1 : 0;
   archiveTransition = lerp(archiveTransition, archiveTargetTransition, 0.06);
 
@@ -1331,7 +1343,7 @@ function drawMemoryArchiveView() {
 
 function drawMobileArchiveView() {
   let pad = 22;
-  let y = 86 + archivePan.y;
+  let y = 86 - getMobileArchiveScrollY();
 
   noStroke();
   fill(48);
@@ -1423,7 +1435,7 @@ function drawMobileArchiveCard(d, archiveIndex, x, y, w, h, rotation) {
 
 function getMobileArchiveCardAt(px, py) {
   let pad = 22;
-  let y = 86 + archivePan.y + 62;
+  let y = 86 - getMobileArchiveScrollY() + 62;
 
   for (let groupIndex = 0; groupIndex < 4; groupIndex++) {
     let group = archive
@@ -1786,12 +1798,31 @@ function mouseReleased() {
   handlePointerReleased();
 }
 
+function mouseClicked() {
+  if (isMobileArchiveMode() && !isClickOnViewSwitcher(mouseX, mouseY)) {
+    let hitIndex = getMobileArchiveCardAt(mouseX, mouseY);
+    if (hitIndex >= 0) {
+      selectedAppleIndex = hitIndex;
+      selectedApple = archive[hitIndex] || null;
+      return false;
+    }
+  }
+}
+
 function touchStarted() {
   if (touches.length > 0) {
     let x = touches[0].x;
     let y = touches[0].y;
 
     if (page === "draw" && pointInsideUndoButton(x, y)) {
+      return true;
+    }
+
+    if (isMobileArchiveMode()) {
+      if (isClickOnViewSwitcher(x, y) || isClickOnApplePopupClose(x, y) || isClickOnApplePopup(x, y)) {
+        let handled = handlePointerPressed(x, y);
+        return !handled;
+      }
       return true;
     }
 
@@ -1854,19 +1885,13 @@ function handlePointerPressed(x, y) {
     return true;
   }
 
-  if (isMobileArchiveMode() && !isClickOnViewSwitcher(x, y)) {
-    isArchivePanning = true;
-    lastPanPoint = { x: x, y: y };
-    mobileArchivePressPoint = { x: x, y: y };
-    mobileArchiveDragDistance = 0;
-    return true;
-  }
-
   let archiveRow = getArchiveRowAt(x, y);
   if (archiveRow >= 0) {
     archiveRowDragging = true;
     archiveRowDragIndex = archiveRow;
     archiveRowLastX = x;
+    archiveRowLastMoveTime = millis();
+    archiveRowVelocity[archiveRow] = 0;
     archiveRowPressPoint = { x: x, y: y };
     archiveRowDragDistance = 0;
     return true;
@@ -1925,10 +1950,13 @@ function handlePointerDragged(x, y) {
 
   if (archiveRowDragging) {
     let dx = x - archiveRowLastX;
-    archiveRowPan[archiveRowDragIndex] = (archiveRowPan[archiveRowDragIndex] || 0) + dx;
+    let now = millis();
+    let dt = max(16, now - archiveRowLastMoveTime);
+    applyArchiveRowPanDelta(archiveRowDragIndex, dx, true);
+    archiveRowVelocity[archiveRowDragIndex] = dx / dt * 16.67;
     archiveRowLastX = x;
+    archiveRowLastMoveTime = now;
     archiveRowDragDistance += abs(dx);
-    constrainArchiveRowPan(archiveRowDragIndex);
     return false;
   }
 
@@ -1996,6 +2024,9 @@ function handlePointerReleased() {
         selectedAppleIndex = hitIndex;
         selectedApple = archive[hitIndex] || null;
       }
+    }
+    if (abs(archiveRowVelocity[archiveRowDragIndex] || 0) < 0.02) {
+      constrainArchiveRowPan(archiveRowDragIndex);
     }
     archiveRowDragging = false;
     archiveRowDragIndex = -1;
@@ -2155,6 +2186,50 @@ function isMobileArchiveMode() {
   return page === "draw" && isMobileScreen() && !modalOpen && backgroundViewMode === "archive";
 }
 
+function getMobileArchiveScrollY() {
+  return archiveScrollModeActive ? (window.scrollY || 0) : -archivePan.y;
+}
+
+function updateMobileArchiveScrollMode() {
+  let active = isMobileArchiveMode();
+  if (active === archiveScrollModeActive) {
+    if (active) {
+      document.body.style.height = `${max(height + 1, getMobileArchiveContentHeight() + 80)}px`;
+    }
+    return;
+  }
+
+  archiveScrollModeActive = active;
+  if (active) {
+    document.body.style.position = "static";
+    document.body.style.overflowY = "auto";
+    document.body.style.height = `${max(height + 1, getMobileArchiveContentHeight() + 80)}px`;
+    document.body.style.touchAction = "pan-y";
+    document.documentElement.style.overflowY = "auto";
+    document.documentElement.style.webkitOverflowScrolling = "touch";
+    if (mainCanvas && mainCanvas.elt) {
+      mainCanvas.elt.style.position = "fixed";
+      mainCanvas.elt.style.left = "0";
+      mainCanvas.elt.style.top = "0";
+      mainCanvas.elt.style.touchAction = "pan-y";
+    }
+  } else {
+    window.scrollTo(0, 0);
+    document.body.style.position = "fixed";
+    document.body.style.overflow = "hidden";
+    document.body.style.height = "100%";
+    document.body.style.touchAction = "none";
+    document.documentElement.style.overflowY = "hidden";
+    document.documentElement.style.webkitOverflowScrolling = "auto";
+    if (mainCanvas && mainCanvas.elt) {
+      mainCanvas.elt.style.position = "relative";
+      mainCanvas.elt.style.left = "";
+      mainCanvas.elt.style.top = "";
+      mainCanvas.elt.style.touchAction = "none";
+    }
+  }
+}
+
 function constrainMobileArchivePan() {
   let contentH = getMobileArchiveContentHeight();
   let minY = min(0, height - contentH - 40);
@@ -2185,9 +2260,50 @@ function getArchiveRowAt(x, y) {
 }
 
 function constrainArchiveRowPan(rowIndex) {
+  let bounds = getArchiveRowPanBounds(rowIndex);
+  archiveRowPan[rowIndex] = constrain(archiveRowPan[rowIndex] || 0, bounds.min, bounds.max);
+}
+
+function getArchiveRowPanBounds(rowIndex) {
+  let frame = getArchiveCardsSafeFrame();
   let rowCount = drawBackgroundApplesLayout.filter(item => item.rowIndex === rowIndex).length;
-  let maxLeft = -max(0, rowCount * 74 - (width - getDrawSidebarWidth() - 210));
-  archiveRowPan[rowIndex] = constrain(archiveRowPan[rowIndex] || 0, maxLeft - 34, 80);
+  let rowW = rowCount * 74 + 150;
+  let minX = -max(0, rowW - frame.w);
+  return { min: minX, max: 0 };
+}
+
+function applyArchiveRowPanDelta(rowIndex, dx, withResistance) {
+  let bounds = getArchiveRowPanBounds(rowIndex);
+  let current = archiveRowPan[rowIndex] || 0;
+  let next = current + dx;
+
+  if (withResistance) {
+    if (next > bounds.max) {
+      next = bounds.max + (next - bounds.max) * 0.28;
+    } else if (next < bounds.min) {
+      next = bounds.min + (next - bounds.min) * 0.28;
+    }
+  } else {
+    next = constrain(next, bounds.min, bounds.max);
+  }
+
+  archiveRowPan[rowIndex] = next;
+}
+
+function updateArchiveRowInertia() {
+  if (isMobileScreen() || modalOpen || backgroundViewMode !== "archive") return;
+  if (archiveRowDragging) return;
+
+  for (let i = 0; i < archiveRowVelocity.length; i++) {
+    let v = archiveRowVelocity[i] || 0;
+    if (abs(v) < 0.02) {
+      archiveRowVelocity[i] = 0;
+      continue;
+    }
+
+    applyArchiveRowPanDelta(i, v, false);
+    archiveRowVelocity[i] *= 0.92;
+  }
 }
 
 function constrainArchiveSlicePan() {
@@ -2283,9 +2399,7 @@ function isClickOnDrawingDomControl(x, y) {
 
 function mouseWheel(event) {
   if (isMobileArchiveMode()) {
-    archivePan.y -= event.delta;
-    constrainMobileArchivePan();
-    return false;
+    return true;
   }
 
   if (page === "archiveWall") {
