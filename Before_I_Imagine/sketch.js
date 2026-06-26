@@ -1189,7 +1189,7 @@ function drawFloatingWallCard(d, item) {
   translate(-item.size / 2, -item.size / 2);
   if (item.cachedThumb) {
     tint(255, 255 * min(0.92, item.alpha + 0.12));
-    image(item.cachedThumb, 0, 0, item.size, item.size);
+    drawImageContained(item.cachedThumb, 0, 0, item.size, item.size);
     noTint();
   } else {
     drawMissingImagePlaceholder(item.size, item.size);
@@ -1215,7 +1215,7 @@ function drawFloatingSliceCard(d, item) {
   translate(-item.size / 2, -item.size / 2);
   if (item.cachedThumb) {
     tint(255, 255 * item.alpha);
-    image(item.cachedThumb, 0, 0, item.size, item.size);
+    drawImageContained(item.cachedThumb, 0, 0, item.size, item.size);
     noTint();
   } else {
     drawMissingImagePlaceholder(item.size, item.size);
@@ -1243,7 +1243,7 @@ function drawArchiveTarotCard(d, item, cardW, cardH, hovered) {
   translate(-imageSize / 2, -imageSize / 2 - cardH * 0.04);
   if (item.cachedThumb) {
     tint(255, hovered ? 245 : 210);
-    image(item.cachedThumb, 0, 0, imageSize, imageSize);
+    drawImageContained(item.cachedThumb, 0, 0, imageSize, imageSize);
     noTint();
   } else {
     drawMissingImagePlaceholder(imageSize, imageSize);
@@ -4274,11 +4274,27 @@ function drawReplayMini(d, limit, miniW, miniH, alphaValue) {
 function drawStaticMini(d, miniW, miniH) {
   let preview = getPreviewImage(d);
   if (preview) {
-    image(preview, 0, 0, miniW, miniH);
+    drawImageContained(preview, 0, 0, miniW, miniH);
     return;
   }
 
   drawMissingImagePlaceholder(miniW, miniH);
+}
+
+function drawImageContained(img, x, y, boxW, boxH) {
+  if (!img) return;
+
+  let imgW = img.width || boxW;
+  let imgH = img.height || boxH;
+  if (imgW <= 0 || imgH <= 0) return;
+
+  let scale = min(boxW / imgW, boxH / imgH);
+  let drawW = imgW * scale;
+  let drawH = imgH * scale;
+  let drawX = x + (boxW - drawW) / 2;
+  let drawY = y + (boxH - drawH) / 2;
+
+  image(img, drawX, drawY, drawW, drawH);
 }
 
 function drawMissingImagePlaceholder(w, h) {
