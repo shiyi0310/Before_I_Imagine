@@ -2876,7 +2876,7 @@ async function saveDrawingToCloud(drawingData) {
     delete cloudDrawing.preview;
     let exportCrop = drawingData.drawingArea || getCurrentDrawingExportArea();
     let imageDataUrl = createDrawingLayerImageDataURL(drawingLayer, exportCrop.w, exportCrop.h, 0.82, exportCrop);
-    let thumbDataUrl = createDrawingLayerImageDataURL(drawingLayer, 420, 420, 0.72, exportCrop);
+    let thumbDataUrl = createDrawingLayerImageDataURL(drawingLayer, 1000, 1000, 0.72, exportCrop);
 
     const response = await fetch("/api/drawings", {
       method: "POST",
@@ -2930,7 +2930,7 @@ function getCroppedSourceImage(sourceLayer, cropRect) {
 function drawSourceImageContained(targetGraphics, sourceGraphics, targetW, targetH) {
   let sourceW = sourceGraphics.width || targetW;
   let sourceH = sourceGraphics.height || targetH;
-  let scale = min(targetW / sourceW, targetH / sourceH);
+  let scale = min(targetW / sourceW, targetH / sourceH)*1.5;
   let drawW = sourceW * scale;
   let drawH = sourceH * scale;
   let drawX = (targetW - drawW) / 2;
@@ -3221,7 +3221,7 @@ async function backfillMissingImageUrls(batchSize = 5) {
         : createDrawingImageDataURL(drawing, drawing.canvasWidth || width, drawing.canvasHeight || height, 0.82);
       let thumbDataUrl = drawing.thumb_url
         ? null
-        : createDrawingImageDataURL(drawing, 320, 240, 0.72);
+        : createDrawingImageDataURL(drawing, 1000, 1000, 0.72);
 
       try {
         const updateResponse = await fetch(`/api/drawings/${drawing.dbId}/images`, {
