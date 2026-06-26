@@ -50,6 +50,7 @@ let archiveTaskTitles = [
 ];
 
 let promptIndex = 0;
+let isPromptSaving = false;
 
 let actions = [];
 let currentAction = null;
@@ -237,7 +238,7 @@ function createInterface() {
   submitBtn = createButton("Submit<br>提交");
   submitBtn.mousePressed(submitDrawing);
 
-  nextPromptBtn = createButton("Next<br>下一题");
+  nextPromptBtn = createButton("Next Prompt<br>下一题");
   nextPromptBtn.mousePressed(nextPrompt);
 
   archiveBtn = createButton("Archive<br>档案库");
@@ -321,8 +322,8 @@ function layoutInterface() {
     eraserBtn.position(x + (toolBtnW + gap) * 2, y + 56);
 
     clearBtn.position(x, y + 96);
-    submitBtn.position(x + (actionBtnW + gap), y + 96);
-    nextPromptBtn.position(x + (actionBtnW + gap) * 2, y + 96);
+    submitBtn.position(-9999, -9999);
+    nextPromptBtn.position(x + actionBtnW + gap, y + 96);
     archiveBtn.position(-9999, -9999);
 
     undoBtn.position(drawLayout.drawX + drawLayout.drawW - 64, drawLayout.drawY + 12);
@@ -355,8 +356,8 @@ function layoutInterface() {
 
     let actionX = toolX + (btnW + gap) * 3 + 10;
     clearBtn.position(actionX, y);
-    submitBtn.position(actionX + (btnW + gap), y);
-    nextPromptBtn.position(actionX + (btnW + gap) * 2, y);
+    submitBtn.position(-9999, -9999);
+    nextPromptBtn.position(actionX + (btnW + gap), y);
     archiveBtn.position(-9999, -9999);
     undoBtn.position(drawLayout.drawX + drawLayout.drawW - 78, drawLayout.drawY + 16);
 
@@ -387,8 +388,8 @@ function layoutInterface() {
     eraserBtn.size(toolBtnW, 34);
     undoBtn.size(56, 32);
     clearBtn.size(actionBtnW, 34);
-    submitBtn.size(actionBtnW, 34);
-    nextPromptBtn.size(actionBtnW, 34);
+    submitBtn.size(1, 1);
+    nextPromptBtn.size(actionBtnW * 2 + gap, 34);
     archiveBtn.size(1, 1);
   } else {
     let btnW = 68;
@@ -396,8 +397,8 @@ function layoutInterface() {
     bucketBtn.size(btnW, 52);
     eraserBtn.size(btnW, 52);
     clearBtn.size(btnW, 52);
-    submitBtn.size(btnW, 52);
-    nextPromptBtn.size(btnW, 52);
+    submitBtn.size(1, 1);
+    nextPromptBtn.size(btnW * 2 + gap, 52);
     archiveBtn.size(1, 1);
   }
   sizeArchiveButton(backBtn);
@@ -415,6 +416,8 @@ function layoutInterface() {
     stackBtn.size(archiveNavW, 28);
     exportBtn.size(archiveNavW, 28);
   }
+
+  updatePromptFlowButtonLabel();
 }
 
 function styleButton(btn) {
@@ -495,6 +498,16 @@ function updateToolButtonStyles() {
   eraserBtn.style("color", currentTool === "eraser" ? "#fff" : "#000");
 }
 
+function updatePromptFlowButtonLabel() {
+  if (!nextPromptBtn) return;
+
+  if (promptIndex >= prompts.length - 1) {
+    nextPromptBtn.html("Finish<br>完成");
+  } else {
+    nextPromptBtn.html("Next Prompt<br>下一题");
+  }
+}
+
 function updateButtonVisibility() {
   if (page === "draw") {
     if (modalOpen) {
@@ -507,7 +520,7 @@ function updateButtonVisibility() {
       undoBtn.show();
 
       clearBtn.show();
-      submitBtn.show();
+      submitBtn.hide();
       nextPromptBtn.show();
       archiveBtn.hide();
     } else {
@@ -2350,17 +2363,11 @@ function sameFillTarget(c1, c2) {
 // SUBMIT / SAVE / LOAD
 // -------------------------
 
-function submitDrawing() {
-  if (!saveCurrentDrawing()) {
-    alert("Please draw something first.");
-    return;
-  }
-
-  alert("Drawing saved.");
-  advancePrompt();
+async function submitDrawing() {
+  await completeCurrentPrompt();
 }
 
-function saveCurrentDrawing() {
+async function saveCurrentDrawing() {
   if (actions.length === 0) {
     return false;
   }
@@ -2387,7 +2394,7 @@ function saveCurrentDrawing() {
     generateDrawBackgroundApplesLayout();
   }
   markStackDirty();
-  saveDrawingToCloud(drawingData);
+  await saveDrawingToCloud(drawingData);
 
   return true;
 }
@@ -2436,17 +2443,47 @@ function redrawDrawingLayerFromActions() {
   }
 }
 
-function nextPrompt() {
-  if (actions.length > 0) {
-    saveCurrentDrawing();
-  }
+async function nextPrompt() {
+  await completeCurrentPrompt();
+}
 
-  advancePrompt();
+async function completeCurrentPrompt() {
+  if (isPromptSaving) return;
+  isPromptSaving = true;
+  if (nextPromptBtn) nextPromptBtn.attribute("disabled", "");
+  if (submitBtn) submitBtn.attribute("disabled", "");
+
+  try {
+    let saved = await saveCurrentDrawing();
+    if (!saved) {
+      alert("Please draw something first.");
+      return;
+    }
+
+    advancePrompt();
+  } finally {
+    isPromptSaving = false;
+    if (nextPromptBtn && nextPromptBtn.elt) nextPromptBtn.elt.removeAttribute("disabled");
+    if (submitBtn && submitBtn.elt) submitBtn.elt.removeAttribute("disabled");
+    updatePromptFlowButtonLabel();
+  }
 }
 
 function advancePrompt() {
-  promptIndex = (promptIndex + 1) % prompts.length;
+  if (promptIndex < prompts.length - 1) {
+    promptIndex += 1;
+    clearDrawing();
+    updatePromptFlowButtonLabel();
+    layoutInterface();
+    return;
+  }
+
   clearDrawing();
+  modalOpen = false;
+  backgroundViewMode = "archive";
+  if (isMobileScreen()) mobileArchiveReady = true;
+  generateDrawBackgroundApplesLayout();
+  layoutInterface();
 }
 
 function saveArchive() {
