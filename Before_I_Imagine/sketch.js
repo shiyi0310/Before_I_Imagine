@@ -143,6 +143,7 @@ let archivePan = { x: 0, y: 0 };
 let archiveSlicePanX = 0;
 let archiveSliceDragging = false;
 let archiveSliceLastX = 0;
+let slicePromptIndex = 0;
 let mobileArchivePressPoint = { x: 0, y: 0 };
 let mobileArchiveDragDistance = 0;
 let wallCamera = { x: 0, y: 0, zoom: 1 };
@@ -935,7 +936,7 @@ function drawDrawPageSidebar() {
   textAlign(LEFT);
   textSize(14);
   drawingContext.letterSpacing = "2px";
-  text("Is This an Apple?", 30, 42);
+  text("BEFORE I IMAGINE", 30, 42);
   drawingContext.letterSpacing = "0px";
 
   fill(mutedCol);
@@ -1128,8 +1129,8 @@ function drawFloatingArchiveApples() {
   let mobile = isMobileScreen();
 
   if (backgroundViewMode === "slice") {
-    push();
-    translate(archiveSlicePanX, 0);
+    drawSlicePromptComposite();
+    return;
   }
 
   for (let item of drawBackgroundApplesLayout) {
@@ -1186,7 +1187,113 @@ function drawFloatingArchiveApples() {
     pop();
   }
 
-  if (backgroundViewMode === "slice") {
+}
+
+function getSlicePromptTabs() {
+  let sidebarW = isMobileScreen() ? 0 : getDrawSidebarWidth();
+  let labels = ["DEFAULT", "TOUCH", "TASTE", "IMPERFECT"];
+  let gap = 7;
+  let tabW = isMobileScreen() ? 68 : 88;
+  let tabH = 28;
+  let totalW = labels.length * tabW + (labels.length - 1) * gap;
+  let centerX = sidebarW + (width - sidebarW) / 2;
+  let startX = centerX - totalW / 2;
+  let y = isMobileScreen() ? 78 : 104;
+
+  return labels.map((label, index) => ({
+    index: index,
+    label: label,
+    x: startX + index * (tabW + gap),
+    y: y,
+    w: tabW,
+    h: tabH
+  }));
+}
+
+function getSlicePromptTabAt(x, y) {
+  if (modalOpen || backgroundViewMode !== "slice") return -1;
+  for (let tab of getSlicePromptTabs()) {
+    if (pointInsideRect(x, y, tab)) return tab.index;
+  }
+  return -1;
+}
+
+function drawSlicePromptComposite() {
+  let sidebarW = isMobileScreen() ? 0 : getDrawSidebarWidth();
+  let contentX = sidebarW;
+  let contentW = width - sidebarW;
+  let tabs = getSlicePromptTabs();
+  let selectedItems = drawBackgroundApplesLayout.filter((item) => {
+    let d = archive[item.archiveIndex];
+    return d && getDrawingPromptIndex(d) === slicePromptIndex;
+  });
+
+  for (let tab of tabs) {
+    let active = tab.index === slicePromptIndex;
+    noStroke();
+    fill(active ? 43 : 251, active ? 40 : 249, active ? 36 : 244, active ? 225 : 205);
+    rect(tab.x, tab.y, tab.w, tab.h, 14);
+    if (!active) {
+      noFill();
+      stroke(166, 157, 145, 125);
+      strokeWeight(1);
+      rect(tab.x + 0.5, tab.y + 0.5, tab.w - 1, tab.h - 1, 14);
+    }
+    noStroke();
+    fill(active ? 250 : 92, active ? 248 : 85, active ? 244 : 77);
+    textAlign(CENTER, CENTER);
+    textSize(isMobileScreen() ? 8.5 : 9.5);
+    text(tab.label, tab.x + tab.w / 2, tab.y + tab.h / 2 + 0.5);
+  }
+
+  let promptLabels = ["TASK 01 / DEFAULT", "TASK 02 / TOUCH MEMORY", "TASK 03 / TASTE MEMORY", "TASK 04 / IMPERFECT MEMORY"];
+  let labelY = tabs[0].y + tabs[0].h + 24;
+  noStroke();
+  fill(62, 57, 52, 205);
+  textAlign(CENTER, CENTER);
+  textSize(isMobileScreen() ? 11 : 12);
+  text(`${promptLabels[slicePromptIndex]}  ·  ${selectedItems.length} drawings`, contentX + contentW / 2, labelY);
+
+  let availableH = max(220, height - labelY - 62);
+  let cardW = min(isMobileScreen() ? width - 48 : 390, contentW * (isMobileScreen() ? 0.82 : 0.38));
+  let cardH = min(isMobileScreen() ? 420 : 500, availableH * 0.84);
+  let centerX = contentX + contentW / 2;
+  let centerY = labelY + 24 + availableH / 2;
+
+  drawingContext.save();
+  drawingContext.shadowColor = "rgba(54, 44, 32, 0.13)";
+  drawingContext.shadowBlur = 28;
+  drawingContext.shadowOffsetY = 15;
+  noStroke();
+  fill(252, 249, 241, 118);
+  rect(centerX - cardW / 2, centerY - cardH / 2, cardW, cardH, 10);
+  drawingContext.restore();
+
+  for (let layer = 2; layer >= 0; layer--) {
+    let offset = (layer + 1) * 5;
+    noFill();
+    stroke(255, 255, 255, 55 + layer * 12);
+    strokeWeight(1);
+    rect(centerX - cardW / 2 + offset, centerY - cardH / 2 - offset, cardW, cardH, 10);
+  }
+
+  let imageSize = min(cardW * 0.78, cardH * 0.7);
+  let imageAlpha = constrain(34 - selectedItems.length * 0.08, 20, 34);
+  for (let i = 0; i < selectedItems.length; i++) {
+    let item = selectedItems[i];
+    let d = archive[item.archiveIndex];
+    if (!item.cachedThumb) item.cachedThumb = getPreviewImage(d);
+    if (!item.cachedThumb) continue;
+
+    let offsetX = sin((item.archiveIndex + 1) * 2.17) * min(12, cardW * 0.035);
+    let offsetY = cos((item.archiveIndex + 1) * 1.63) * min(10, cardH * 0.025);
+    let rotation = sin((item.archiveIndex + 1) * 0.91) * 0.025;
+    push();
+    translate(centerX + offsetX, centerY + offsetY);
+    rotate(rotation);
+    tint(255, imageAlpha);
+    drawImageContained(item.cachedThumb, -imageSize / 2, -imageSize / 2, imageSize, imageSize);
+    noTint();
     pop();
   }
 }
@@ -1632,7 +1739,7 @@ function drawDrawingTitle() {
   textStyle(NORMAL);
   textSize(isMobileScreen() ? 26 : 34);
   drawingContext.letterSpacing = isMobileScreen() ? "1.2px" : "2.2px";
-  text("Is This an Apple?", width / 2, drawLayout.titleY);
+  text("BEFORE I IMAGINE", width / 2, drawLayout.titleY);
   drawingContext.letterSpacing = "0px";
 
   fill(92);
@@ -2177,6 +2284,12 @@ function handleDrawPageClick(x, y) {
     return true;
   }
 
+  let sliceTabIndex = getSlicePromptTabAt(x, y);
+  if (sliceTabIndex >= 0) {
+    slicePromptIndex = sliceTabIndex;
+    return true;
+  }
+
   if (modalOpen && isClickOnModalClose(x, y)) {
     modalOpen = false;
     currentAction = null;
@@ -2262,12 +2375,7 @@ function constrainMobileArchivePan() {
 }
 
 function canPanArchiveSliceAt(x, y) {
-  return (
-    isArchiveSliceMode() &&
-    !isClickOnSidebar(x, y) &&
-    !isClickOnViewSwitcher(x, y) &&
-    !isClickOnReopenDrawingButton(x, y)
-  );
+  return false;
 }
 
 function getArchiveRowAt(x, y) {
@@ -2469,9 +2577,7 @@ function mouseWheel(event) {
   }
 
   if (isArchiveSliceMode()) {
-    archiveSlicePanX -= event.delta;
-    constrainArchiveSlicePan();
-    return false;
+    return true;
   }
 
   if (page === "draw" && !modalOpen && backgroundViewMode === "archive") {
