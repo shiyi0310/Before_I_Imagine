@@ -1054,7 +1054,7 @@ function generateDrawBackgroundApplesLayout() {
 
   let mobile = isMobileScreen();
   let sidebarW = mobile ? 0 : getDrawSidebarWidth();
-  let count = mobile ? min(archive.length, 12) : archive.length;
+  let count = mobile ? min(archive.length, 24) : archive.length;
   let recent = archive.slice(-count);
   let archiveStartIndex = archive.length - recent.length;
   let left = sidebarW + (mobile ? 18 : 34);
