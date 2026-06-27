@@ -144,6 +144,10 @@ let archiveSlicePanX = 0;
 let archiveSliceDragging = false;
 let archiveSliceLastX = 0;
 let slicePromptIndex = 0;
+let averagePromptIndex = 0;
+let averageViewMode = "common";
+let averageAppleCache = [null, null, null, null];
+let averageThresholdQuantile = 0.72;
 let mobileArchivePressPoint = { x: 0, y: 0 };
 let mobileArchiveDragDistance = 0;
 let wallCamera = { x: 0, y: 0, zoom: 1 };
@@ -730,7 +734,9 @@ function drawImmersiveDrawingPage() {
 
   drawPaperBackground();
   if (!isMobileScreen()) {
-    if (backgroundViewMode === "archive") {
+    if (backgroundViewMode === "average") {
+      drawAverageAppleView();
+    } else if (backgroundViewMode === "archive") {
       drawMemoryArchiveView();
       drawFloatingArchiveApples();
     } else {
@@ -739,7 +745,9 @@ function drawImmersiveDrawingPage() {
     drawDrawPageSidebar();
     drawBackgroundViewSwitcher();
   } else if (mobileArchiveReady && !modalOpen) {
-    if (backgroundViewMode === "archive") {
+    if (backgroundViewMode === "average") {
+      drawAverageAppleView();
+    } else if (backgroundViewMode === "archive") {
       drawMobileArchiveView();
     } else {
       drawFloatingArchiveApples();
@@ -760,7 +768,7 @@ function drawImmersiveDrawingPage() {
     drawToolbarPanel();
     drawDrawingModalClose();
     drawDrawingFooter();
-  } else if (backgroundViewMode !== "slice") {
+  } else if (backgroundViewMode !== "slice" && backgroundViewMode !== "average") {
     drawReopenDrawingButton();
   }
 
@@ -808,7 +816,7 @@ function drawDrawingModalShadow() {
 }
 
 function getBackgroundViewSwitcherRect() {
-  let w = isMobileScreen() ? min(width - 32, 300) : 420;
+  let w = isMobileScreen() ? min(width - 24, 360) : 540;
   let h = isMobileScreen() ? 40 : 52;
   let x = isMobileScreen() ? (width - w) / 2 : getDrawSidebarWidth() + (width - getDrawSidebarWidth() - w) / 2;
   let y = isMobileScreen() ? 20 : 28;
@@ -834,7 +842,7 @@ function drawBackgroundViewSwitcher() {
     if (i < options.length - 1) {
       stroke(156, 148, 137, 110);
       strokeWeight(1);
-      let sepX = options[i].x + options[i].w + 10;
+      let sepX = options[i].x + options[i].w + options[i].gap / 2;
       line(sepX, r.y + 15, sepX, r.y + r.h - 15);
     }
   }
@@ -855,20 +863,26 @@ function getTopToolbarActiveMode() {
 
 function getTopToolbarOptions(r) {
   let labels = isMobileScreen() ? [
-    { mode: "draw", label: "DRAW", w: 64 },
-    { mode: "wall", label: "WALL", w: 64 },
-    { mode: "archive", label: "ARCHIVE", w: 88 }
+    { mode: "draw", label: "DRAW", w: 48 },
+    { mode: "wall", label: "WALL", w: 48 },
+    { mode: "archive", label: "ARCHIVE", w: 68 },
+    { mode: "average", label: "AVERAGE", w: 72 }
   ] : [
-    { mode: "draw", label: "DRAW", w: 72 },
-    { mode: "archive", label: "ARCHIVE", w: 100 },
-    { mode: "wall", label: "WALL", w: 76 },
-    { mode: "slice", label: "SLICE", w: 76 }
+    { mode: "draw", label: "DRAW", w: 62 },
+    { mode: "archive", label: "ARCHIVE", w: 82 },
+    { mode: "wall", label: "WALL", w: 62 },
+    { mode: "slice", label: "SLICE", w: 62 },
+    { mode: "average", label: "AVERAGE APPLE", w: 112 }
   ];
-  let x = r.x + (isMobileScreen() ? 18 : 28);
+  let sidePadding = isMobileScreen() ? 14 : 24;
+  let labelsW = labels.reduce((sum, item) => sum + item.w, 0);
+  let gap = max(6, (r.w - sidePadding * 2 - labelsW) / max(1, labels.length - 1));
+  let x = r.x + sidePadding;
 
   for (let item of labels) {
     item.x = x;
-    x += item.w + 22;
+    item.gap = gap;
+    x += item.w + gap;
   }
 
   return labels;
@@ -893,7 +907,7 @@ function getModalCloseRect() {
 }
 
 function drawReopenDrawingButton() {
-  if (backgroundViewMode === "slice") return;
+  if (backgroundViewMode === "slice" || backgroundViewMode === "average") return;
 
   let r = getReopenDrawingButtonRect();
 
@@ -1054,7 +1068,7 @@ function generateDrawBackgroundApplesLayout() {
 
   let mobile = isMobileScreen();
   let sidebarW = mobile ? 0 : getDrawSidebarWidth();
-  let count = mobile ? min(archive.length, 40) : archive.length;
+  let count = mobile ? min(archive.length, 24) : archive.length;
   let recent = archive.slice(-count);
   let archiveStartIndex = archive.length - recent.length;
   let left = sidebarW + (mobile ? 18 : 34);
@@ -1298,6 +1312,357 @@ function drawSlicePromptComposite() {
     noTint();
     pop();
   }
+}
+
+function getAverageAppleLayout() {
+  let sidebarW = isMobileScreen() ? 0 : getDrawSidebarWidth();
+  let contentX = sidebarW;
+  let contentW = width - sidebarW;
+  let promptY = isMobileScreen() ? 82 : 112;
+  let promptGap = isMobileScreen() ? 5 : 7;
+  let promptW = min(isMobileScreen() ? 76 : 112, (contentW - 36 - promptGap * 3) / 4);
+  let promptTotalW = promptW * 4 + promptGap * 3;
+  let promptX = contentX + (contentW - promptTotalW) / 2;
+  let promptTabs = ["DEFAULT", "TOUCH", "TASTE", "IMPERFECT"].map((label, index) => ({
+    type: "prompt",
+    value: index,
+    label: label,
+    x: promptX + index * (promptW + promptGap),
+    y: promptY,
+    w: promptW,
+    h: isMobileScreen() ? 26 : 28
+  }));
+
+  let viewY = promptY + (isMobileScreen() ? 34 : 38);
+  let viewGap = isMobileScreen() ? 5 : 7;
+  let viewLabels = [
+    { value: "all", label: isMobileScreen() ? "ALL" : "ALL DRAWINGS" },
+    { value: "common", label: "COMMON TRACE" },
+    { value: "average", label: "AVERAGE APPLE" }
+  ];
+  let viewW = min(isMobileScreen() ? 102 : 142, (contentW - 32 - viewGap * 2) / 3);
+  let viewTotalW = viewW * 3 + viewGap * 2;
+  let viewX = contentX + (contentW - viewTotalW) / 2;
+  let viewTabs = viewLabels.map((item, index) => ({
+    type: "view",
+    value: item.value,
+    label: item.label,
+    x: viewX + index * (viewW + viewGap),
+    y: viewY,
+    w: viewW,
+    h: isMobileScreen() ? 28 : 30
+  }));
+
+  let panelTop = viewY + (isMobileScreen() ? 48 : 56);
+  let maxPanel = min(contentW - (isMobileScreen() ? 30 : 100), height - panelTop - 34);
+  let panelSize = constrain(maxPanel, isMobileScreen() ? 230 : 300, isMobileScreen() ? 430 : 620);
+
+  return {
+    contentX: contentX,
+    contentW: contentW,
+    promptTabs: promptTabs,
+    viewTabs: viewTabs,
+    panel: {
+      x: contentX + (contentW - panelSize) / 2,
+      y: panelTop,
+      w: panelSize,
+      h: panelSize
+    }
+  };
+}
+
+function drawAverageAppleView() {
+  ensureAveragePromptCache(averagePromptIndex);
+  let layout = getAverageAppleLayout();
+  let cache = averageAppleCache[averagePromptIndex];
+
+  noStroke();
+  fill(52, 48, 44, 220);
+  textAlign(LEFT, CENTER);
+  textSize(isMobileScreen() ? 13 : 16);
+  text("AVERAGE APPLE", layout.contentX + (isMobileScreen() ? 18 : 46), isMobileScreen() ? 72 : 92);
+
+  drawAverageControlTabs(layout.promptTabs, averagePromptIndex);
+  drawAverageControlTabs(layout.viewTabs, averageViewMode);
+
+  let panel = layout.panel;
+  drawingContext.save();
+  drawingContext.shadowColor = "rgba(48, 39, 29, 0.12)";
+  drawingContext.shadowBlur = 28;
+  drawingContext.shadowOffsetY = 14;
+  noStroke();
+  fill(252, 249, 242, 205);
+  rect(panel.x, panel.y, panel.w, panel.h, 9);
+  drawingContext.restore();
+  noFill();
+  stroke(218, 208, 195, 145);
+  strokeWeight(1);
+  rect(panel.x + 0.5, panel.y + 0.5, panel.w - 1, panel.h - 1, 9);
+
+  if (!cache || cache.status === "loading") {
+    let loaded = cache ? cache.loaded : 0;
+    let total = cache ? cache.total : 0;
+    noStroke();
+    fill(mutedCol);
+    textAlign(CENTER, CENTER);
+    textSize(isMobileScreen() ? 11 : 12);
+    text(total > 0 ? `reading drawing traces  ${loaded} / ${total}` : "reading drawing traces", panel.x + panel.w / 2, panel.y + panel.h / 2);
+    return;
+  }
+
+  if (cache.status === "error" || cache.count === 0) {
+    noStroke();
+    fill(mutedCol);
+    textAlign(CENTER, CENTER);
+    textSize(isMobileScreen() ? 11 : 12);
+    text(cache.status === "error" ? "Could not build this trace." : "No valid brush traces in this prompt.", panel.x + panel.w / 2, panel.y + panel.h / 2);
+    return;
+  }
+
+  let buffer = averageViewMode === "all"
+    ? cache.all
+    : averageViewMode === "average"
+      ? cache.average
+      : cache.common;
+  if (buffer) image(buffer, panel.x, panel.y, panel.w, panel.h);
+
+  noStroke();
+  fill(82, 75, 68, 170);
+  textAlign(CENTER, CENTER);
+  textSize(isMobileScreen() ? 9 : 10);
+  let promptName = ["DEFAULT", "TOUCH MEMORY", "TASTE MEMORY", "IMPERFECT MEMORY"][averagePromptIndex];
+  text(`${promptName}  ·  ${cache.count} valid drawings`, panel.x + panel.w / 2, panel.y + panel.h + 18);
+}
+
+function drawAverageControlTabs(tabs, activeValue) {
+  for (let tab of tabs) {
+    let active = tab.value === activeValue;
+    noStroke();
+    fill(active ? 43 : 251, active ? 40 : 249, active ? 36 : 244, active ? 226 : 205);
+    rect(tab.x, tab.y, tab.w, tab.h, tab.h / 2);
+    if (!active) {
+      noFill();
+      stroke(166, 157, 145, 125);
+      strokeWeight(1);
+      rect(tab.x + 0.5, tab.y + 0.5, tab.w - 1, tab.h - 1, tab.h / 2);
+    }
+    noStroke();
+    fill(active ? 250 : 92, active ? 248 : 85, active ? 244 : 77);
+    textAlign(CENTER, CENTER);
+    textSize(isMobileScreen() ? 7.5 : 9);
+    text(tab.label, tab.x + tab.w / 2, tab.y + tab.h / 2 + 0.5);
+  }
+}
+
+function handleAverageAppleClick(x, y) {
+  if (modalOpen || backgroundViewMode !== "average") return false;
+  let layout = getAverageAppleLayout();
+  for (let tab of layout.promptTabs) {
+    if (pointInsideRect(x, y, tab)) {
+      averagePromptIndex = tab.value;
+      ensureAveragePromptCache(averagePromptIndex);
+      return true;
+    }
+  }
+  for (let tab of layout.viewTabs) {
+    if (pointInsideRect(x, y, tab)) {
+      averageViewMode = tab.value;
+      return true;
+    }
+  }
+  return false;
+}
+
+function ensureAveragePromptCache(promptIndex) {
+  let existing = averageAppleCache[promptIndex];
+  if (existing && (existing.status === "loading" || existing.status === "ready")) return;
+
+  let indices = [];
+  for (let i = 0; i < archive.length; i++) {
+    if (getDrawingPromptIndex(archive[i]) === promptIndex) indices.push(i);
+  }
+
+  let entry = {
+    status: "loading",
+    total: indices.length,
+    loaded: 0,
+    count: 0,
+    all: null,
+    common: null,
+    average: null
+  };
+  averageAppleCache[promptIndex] = entry;
+
+  (async () => {
+    try {
+      let drawings = [];
+      let batchSize = 5;
+      for (let start = 0; start < indices.length; start += batchSize) {
+        let batch = indices.slice(start, start + batchSize);
+        let loadedBatch = await Promise.all(batch.map(loadAverageDrawingActions));
+        drawings.push(...loadedBatch.filter(Boolean));
+        entry.loaded = min(indices.length, start + batch.length);
+      }
+
+      if (averageAppleCache[promptIndex] !== entry) return;
+      let normalized = [];
+      for (let drawing of drawings) {
+        try {
+          let result = normalizeDrawingForAverage(drawing, 800, 80);
+          if (result) normalized.push(result);
+        } catch (error) {
+          console.warn("Skipping drawing during Average Apple normalization:", drawing && drawing.dbId, error);
+        }
+      }
+
+      let buffers = buildAverageAppleBuffers(normalized, 800);
+      entry.status = "ready";
+      entry.count = normalized.length;
+      entry.all = buffers.all;
+      entry.common = buffers.common;
+      entry.average = buffers.average;
+    } catch (error) {
+      console.warn("Could not build Average Apple:", error);
+      entry.status = "error";
+    }
+  })();
+}
+
+async function loadAverageDrawingActions(index) {
+  let drawing = archive[index];
+  if (!drawing) return null;
+  if (Array.isArray(drawing.actions)) return drawing;
+  if (!drawing.dbId) return null;
+
+  try {
+    let response = await fetch(`/api/drawings/${drawing.dbId}`);
+    if (!response.ok) throw new Error(await response.text());
+    let fullDrawing = normalizeDrawingData(await response.json());
+    if (!fullDrawing) return null;
+    archive[index] = {
+      ...drawing,
+      ...fullDrawing,
+      thumb_url: fullDrawing.thumb_url || drawing.thumb_url || null,
+      image_url: fullDrawing.image_url || drawing.image_url || null
+    };
+    return archive[index];
+  } catch (error) {
+    console.warn("Could not load drawing actions for Average Apple:", drawing.dbId, error);
+    return null;
+  }
+}
+
+function normalizeDrawingForAverage(drawing, targetSize, padding) {
+  let strokes = [];
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+
+  for (let action of drawing.actions || []) {
+    if (!action || action.type !== "stroke" || (action.tool && action.tool !== "brush")) continue;
+    let points = (action.points || []).filter((point) => Number.isFinite(Number(point.x)) && Number.isFinite(Number(point.y)));
+    if (points.length === 0) continue;
+    for (let point of points) {
+      let x = Number(point.x);
+      let y = Number(point.y);
+      minX = min(minX, x);
+      minY = min(minY, y);
+      maxX = max(maxX, x);
+      maxY = max(maxY, y);
+    }
+    strokes.push({
+      color: action.color || "#111111",
+      size: Number(action.size) || 4,
+      points: points
+    });
+  }
+
+  if (strokes.length === 0 || !Number.isFinite(minX) || !Number.isFinite(minY)) return null;
+  let contentW = max(1, maxX - minX);
+  let contentH = max(1, maxY - minY);
+  let scaleFactor = min((targetSize - padding * 2) / contentW, (targetSize - padding * 2) / contentH);
+  let offsetX = (targetSize - contentW * scaleFactor) / 2;
+  let offsetY = (targetSize - contentH * scaleFactor) / 2;
+
+  return {
+    strokes: strokes.map((stroke) => ({
+      color: stroke.color,
+      size: constrain(stroke.size * scaleFactor, 1.4, 10),
+      points: stroke.points.map((point) => ({
+        x: offsetX + (Number(point.x) - minX) * scaleFactor,
+        y: offsetY + (Number(point.y) - minY) * scaleFactor,
+        t: Number(point.t) || 0
+      }))
+    }))
+  };
+}
+
+function buildAverageAppleBuffers(normalizedDrawings, size) {
+  let allBuffer = createGraphics(size, size);
+  let commonBuffer = createGraphics(size, size);
+  let averageBuffer = createGraphics(size, size);
+  for (let buffer of [allBuffer, commonBuffer, averageBuffer]) {
+    buffer.pixelDensity(1);
+    buffer.clear();
+    buffer.smooth();
+  }
+
+  let allAlpha = constrain(58 / sqrt(max(1, normalizedDrawings.length)), 9, 24);
+  for (let drawing of normalizedDrawings) {
+    drawNormalizedAverageStrokes(allBuffer, drawing, allAlpha, false);
+    drawNormalizedAverageStrokes(commonBuffer, drawing, 15, true);
+  }
+
+  commonBuffer.loadPixels();
+  averageBuffer.loadPixels();
+  let alphaValues = [];
+  for (let i = 3; i < commonBuffer.pixels.length; i += 4) {
+    if (commonBuffer.pixels[i] > 0) alphaValues.push(commonBuffer.pixels[i]);
+  }
+  alphaValues.sort((a, b) => a - b);
+  let threshold = alphaValues.length > 0
+    ? alphaValues[floor((alphaValues.length - 1) * averageThresholdQuantile)]
+    : 255;
+  let maxAlpha = alphaValues.length > 0 ? alphaValues[alphaValues.length - 1] : 255;
+
+  for (let i = 0; i < commonBuffer.pixels.length; i += 4) {
+    let alpha = commonBuffer.pixels[i + 3];
+    if (alpha < threshold || alpha === 0) continue;
+    let resultAlpha = maxAlpha > threshold ? map(alpha, threshold, maxAlpha, 115, 245) : 210;
+    averageBuffer.pixels[i] = 24;
+    averageBuffer.pixels[i + 1] = 22;
+    averageBuffer.pixels[i + 2] = 20;
+    averageBuffer.pixels[i + 3] = constrain(resultAlpha, 115, 245);
+  }
+  averageBuffer.updatePixels();
+
+  return { all: allBuffer, common: commonBuffer, average: averageBuffer };
+}
+
+function drawNormalizedAverageStrokes(buffer, drawing, alphaValue, forceBlack) {
+  buffer.noFill();
+  buffer.strokeCap(ROUND);
+  buffer.strokeJoin(ROUND);
+  for (let stroke of drawing.strokes) {
+    let strokeColor = forceBlack ? color(20, 19, 18) : color(stroke.color || "#111111");
+    strokeColor.setAlpha(alphaValue);
+    buffer.stroke(strokeColor);
+    buffer.strokeWeight(forceBlack ? constrain(stroke.size, 1.8, 6) : stroke.size);
+    if (stroke.points.length === 1) {
+      buffer.circle(stroke.points[0].x, stroke.points[0].y, max(2, stroke.size));
+      continue;
+    }
+    for (let i = 1; i < stroke.points.length; i++) {
+      let a = stroke.points[i - 1];
+      let b = stroke.points[i];
+      buffer.line(a.x, a.y, b.x, b.y);
+    }
+  }
+}
+
+function invalidateAverageAppleCache() {
+  averageAppleCache = [null, null, null, null];
 }
 
 function drawFloatingWallCard(d, item) {
@@ -2281,8 +2646,15 @@ function handleDrawPageClick(x, y) {
       if (switchMode === "wall" || switchMode === "slice") {
         generateDrawBackgroundApplesLayout();
       }
+      if (switchMode === "average") {
+        ensureAveragePromptCache(averagePromptIndex);
+      }
       layoutInterface();
     }
+    return true;
+  }
+
+  if (handleAverageAppleClick(x, y)) {
     return true;
   }
 
@@ -2300,7 +2672,7 @@ function handleDrawPageClick(x, y) {
     return true;
   }
 
-  if (!modalOpen && backgroundViewMode !== "slice" && isClickOnReopenDrawingButton(x, y)) {
+  if (!modalOpen && backgroundViewMode !== "slice" && backgroundViewMode !== "average" && isClickOnReopenDrawingButton(x, y)) {
     modalOpen = true;
     layoutInterface();
     return true;
@@ -2862,6 +3234,7 @@ async function saveCurrentDrawing() {
 
   archive.push(drawingData);
   saveArchive();
+  invalidateAverageAppleCache();
   if (!isMobileScreen() || mobileArchiveReady) {
     generateDrawBackgroundApplesLayout();
   }
@@ -3489,6 +3862,7 @@ window.backfillMissingImageUrls = backfillMissingImageUrls;
 
 function refreshArchiveViews() {
   clearGridMiniCache();
+  invalidateAverageAppleCache();
   generateArchiveWallLayout();
   calculateMaxLayerUnits();
   generateLayerLayout();
