@@ -760,7 +760,7 @@ function drawImmersiveDrawingPage() {
     drawToolbarPanel();
     drawDrawingModalClose();
     drawDrawingFooter();
-  } else {
+  } else if (backgroundViewMode !== "slice") {
     drawReopenDrawingButton();
   }
 
@@ -893,6 +893,8 @@ function getModalCloseRect() {
 }
 
 function drawReopenDrawingButton() {
+  if (backgroundViewMode === "slice") return;
+
   let r = getReopenDrawingButtonRect();
 
   drawingContext.save();
@@ -2298,7 +2300,7 @@ function handleDrawPageClick(x, y) {
     return true;
   }
 
-  if (!modalOpen && isClickOnReopenDrawingButton(x, y)) {
+  if (!modalOpen && backgroundViewMode !== "slice" && isClickOnReopenDrawingButton(x, y)) {
     modalOpen = true;
     layoutInterface();
     return true;
