@@ -1339,9 +1339,12 @@ function getAverageAppleLayout() {
     { value: "common", label: "COMMON TRACE" },
     { value: "average", label: "AVERAGE APPLE" }
   ];
-  let viewW = min(isMobileScreen() ? 102 : 142, (contentW - 32 - viewGap * 2) / 3);
-  let viewTotalW = viewW * 3 + viewGap * 2;
-  let viewX = contentX + (contentW - viewTotalW) / 2;
+  let saveGap = isMobileScreen() ? 6 : 12;
+  let saveW = isMobileScreen() ? 82 : 104;
+  let availableControlsW = contentW - (isMobileScreen() ? 24 : 64);
+  let viewW = min(isMobileScreen() ? 88 : 132, (availableControlsW - saveW - saveGap - viewGap * 2) / 3);
+  let controlsTotalW = viewW * 3 + viewGap * 2 + saveGap + saveW;
+  let viewX = contentX + (contentW - controlsTotalW) / 2;
   let viewTabs = viewLabels.map((item, index) => ({
     type: "view",
     value: item.value,
@@ -1351,6 +1354,12 @@ function getAverageAppleLayout() {
     w: viewW,
     h: isMobileScreen() ? 28 : 30
   }));
+  let saveButton = {
+    x: viewX + viewW * 3 + viewGap * 2 + saveGap,
+    y: viewY,
+    w: saveW,
+    h: isMobileScreen() ? 28 : 30
+  };
 
   let panelTop = viewY + (isMobileScreen() ? 48 : 56);
   let maxPanel = min(contentW - (isMobileScreen() ? 30 : 100), height - panelTop - 34);
@@ -1361,6 +1370,7 @@ function getAverageAppleLayout() {
     contentW: contentW,
     promptTabs: promptTabs,
     viewTabs: viewTabs,
+    saveButton: saveButton,
     panel: {
       x: contentX + (contentW - panelSize) / 2,
       y: panelTop,
@@ -1383,6 +1393,7 @@ function drawAverageAppleView() {
 
   drawAverageControlTabs(layout.promptTabs, averagePromptIndex);
   drawAverageControlTabs(layout.viewTabs, averageViewMode);
+  drawAverageSaveButton(layout.saveButton, cache && cache.status === "ready" && cache.count > 0);
 
   let panel = layout.panel;
   drawingContext.save();
@@ -1453,6 +1464,21 @@ function drawAverageControlTabs(tabs, activeValue) {
   }
 }
 
+function drawAverageSaveButton(button, enabled) {
+  noStroke();
+  fill(enabled ? 251 : 236, enabled ? 249 : 232, enabled ? 244 : 226, enabled ? 215 : 150);
+  rect(button.x, button.y, button.w, button.h, button.h / 2);
+  noFill();
+  stroke(155, 145, 133, enabled ? 145 : 70);
+  strokeWeight(1);
+  rect(button.x + 0.5, button.y + 0.5, button.w - 1, button.h - 1, button.h / 2);
+  noStroke();
+  fill(78, 71, 64, enabled ? 220 : 90);
+  textAlign(CENTER, CENTER);
+  textSize(isMobileScreen() ? 7.5 : 9);
+  text("SAVE IMAGE", button.x + button.w / 2, button.y + button.h / 2 + 0.5);
+}
+
 function handleAverageAppleClick(x, y) {
   if (modalOpen || backgroundViewMode !== "average") return false;
   let layout = getAverageAppleLayout();
@@ -1468,6 +1494,10 @@ function handleAverageAppleClick(x, y) {
       averageViewMode = tab.value;
       return true;
     }
+  }
+  if (pointInsideRect(x, y, layout.saveButton)) {
+    saveAverageAppleSVG();
+    return true;
   }
   return false;
 }
@@ -1488,7 +1518,8 @@ function ensureAveragePromptCache(promptIndex) {
     count: 0,
     all: null,
     common: null,
-    average: null
+    average: null,
+    exportData: null
   };
   averageAppleCache[promptIndex] = entry;
 
@@ -1520,6 +1551,7 @@ function ensureAveragePromptCache(promptIndex) {
       entry.all = buffers.all;
       entry.common = buffers.common;
       entry.average = buffers.average;
+      entry.exportData = buffers.exportData;
     } catch (error) {
       console.warn("Could not build Average Apple:", error);
       entry.status = "error";
@@ -1647,7 +1679,19 @@ function buildAverageAppleBuffers(normalizedDrawings, size) {
   }
   averageBuffer.updatePixels();
 
-  return { all: allBuffer, common: commonBuffer, average: averageBuffer };
+  return {
+    all: allBuffer,
+    common: commonBuffer,
+    average: averageBuffer,
+    exportData: {
+      size: size,
+      normalizedDrawings: normalizedDrawings,
+      allAlpha: allAlpha,
+      pixelFrequency: pixelFrequency,
+      frequencyThreshold: frequencyThreshold,
+      validParticipantCount: validParticipantCount
+    }
+  };
 }
 
 function drawNormalizedAverageStrokes(buffer, drawing, alphaValue, forceBlack) {
@@ -1669,6 +1713,121 @@ function drawNormalizedAverageStrokes(buffer, drawing, alphaValue, forceBlack) {
       buffer.line(a.x, a.y, b.x, b.y);
     }
   }
+}
+
+function saveAverageAppleSVG() {
+  let cache = averageAppleCache[averagePromptIndex];
+  if (!cache || cache.status !== "ready" || !cache.exportData) {
+    console.warn("Average Apple export is not ready yet.");
+    return;
+  }
+
+  let data = cache.exportData;
+  let svgBody = averageViewMode === "average"
+    ? buildAverageFrequencySVG(data)
+    : buildAverageStrokeSVG(data, averageViewMode);
+  let promptSlug = ["default", "touch", "taste", "imperfect"][averagePromptIndex] || "default";
+  let modeSlug = averageViewMode === "all"
+    ? "all-drawings"
+    : averageViewMode === "common"
+      ? "common-trace"
+      : "average-apple";
+  let filename = `average-apple-${promptSlug}-${modeSlug}.svg`;
+  let title = `Average Apple / ${promptSlug} / ${modeSlug}`;
+  let svg = [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${data.size}" height="${data.size}" viewBox="0 0 ${data.size} ${data.size}" fill="none">`,
+    `<title>${title}</title>`,
+    `<g id="apple-visual" shape-rendering="geometricPrecision">`,
+    svgBody,
+    `</g>`,
+    `</svg>`
+  ].join("\n");
+
+  let blob = new Blob([svg], { type: "image/svg+xml;charset=utf-8" });
+  let url = URL.createObjectURL(blob);
+  let link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function buildAverageStrokeSVG(data, mode) {
+  let output = [];
+  for (let drawing of data.normalizedDrawings) {
+    let isCommon = mode === "common";
+    let weight = Number.isFinite(Number(drawing.weight)) ? constrain(Number(drawing.weight), 0, 1) : 1;
+    let opacity = isCommon ? (15 * weight) / 255 : data.allAlpha / 255;
+    if (opacity <= 0) continue;
+
+    for (let stroke of drawing.strokes) {
+      let strokeColor = isCommon ? "#141312" : getAverageSVGColor(stroke.color);
+      let strokeWidth = isCommon ? constrain(stroke.size, 1.8, 6) : stroke.size;
+      if (stroke.points.length === 1) {
+        let point = stroke.points[0];
+        output.push(`<circle cx="${svgNumber(point.x)}" cy="${svgNumber(point.y)}" r="${svgNumber(max(1, strokeWidth / 2))}" fill="${strokeColor}" fill-opacity="${svgNumber(opacity, 4)}"/>`);
+        continue;
+      }
+      if (stroke.points.length < 2) continue;
+      let path = stroke.points.map((point, index) => `${index === 0 ? "M" : "L"}${svgNumber(point.x)} ${svgNumber(point.y)}`).join(" ");
+      output.push(`<path d="${path}" fill="none" stroke="${strokeColor}" stroke-opacity="${svgNumber(opacity, 4)}" stroke-width="${svgNumber(strokeWidth)}" stroke-linecap="round" stroke-linejoin="round"/>`);
+    }
+  }
+  return output.join("\n");
+}
+
+function buildAverageFrequencySVG(data) {
+  let pathsByAlpha = new Map();
+  let size = data.size;
+  let threshold = data.frequencyThreshold;
+  let participantCount = data.validParticipantCount;
+
+  for (let y = 0; y < size; y++) {
+    let x = 0;
+    while (x < size) {
+      let frequency = data.pixelFrequency[y * size + x];
+      if (frequency < threshold) {
+        x++;
+        continue;
+      }
+
+      let alpha = participantCount > threshold
+        ? round(map(frequency, threshold, participantCount, 125, 245))
+        : 210;
+      alpha = constrain(alpha, 125, 245);
+      let startX = x;
+      x++;
+      while (x < size && data.pixelFrequency[y * size + x] === frequency) x++;
+      let runLength = x - startX;
+      if (!pathsByAlpha.has(alpha)) pathsByAlpha.set(alpha, []);
+      pathsByAlpha.get(alpha).push(`M${startX} ${y}h${runLength}v1h-${runLength}z`);
+    }
+  }
+
+  let output = [];
+  for (let [alpha, commands] of pathsByAlpha.entries()) {
+    output.push(`<path d="${commands.join("")}" fill="#181614" fill-opacity="${svgNumber(alpha / 255, 4)}"/>`);
+  }
+  return output.join("\n");
+}
+
+function getAverageSVGColor(value) {
+  try {
+    let parsed = color(value || "#111111");
+    let levels = parsed.levels || [17, 17, 17];
+    return `#${levels.slice(0, 3).map((channel) => constrain(round(channel), 0, 255).toString(16).padStart(2, "0")).join("")}`;
+  } catch (error) {
+    return "#111111";
+  }
+}
+
+function svgNumber(value, digits = 2) {
+  let number = Number(value);
+  if (!Number.isFinite(number)) return "0";
+  return number.toFixed(digits).replace(/\.?0+$/, "");
 }
 
 function invalidateAverageAppleCache() {
