@@ -147,7 +147,6 @@ let slicePromptIndex = 0;
 let averagePromptIndex = 0;
 let averageViewMode = "common";
 let averageAppleCache = [null, null, null, null];
-let averageThresholdQuantile = 0.72;
 let mobileArchivePressPoint = { x: 0, y: 0 };
 let mobileArchiveDragDistance = 0;
 let wallCamera = { x: 0, y: 0, zoom: 1 };
@@ -1604,43 +1603,47 @@ function buildAverageAppleBuffers(normalizedDrawings, size) {
   let allBuffer = createGraphics(size, size);
   let commonBuffer = createGraphics(size, size);
   let averageBuffer = createGraphics(size, size);
-  let averageDensityBuffer = createGraphics(size, size);
-  for (let buffer of [allBuffer, commonBuffer, averageBuffer, averageDensityBuffer]) {
+  let participantMask = createGraphics(size, size);
+  for (let buffer of [allBuffer, commonBuffer, averageBuffer, participantMask]) {
     buffer.pixelDensity(1);
     buffer.clear();
     buffer.smooth();
   }
 
+  let pixelFrequency = new Uint16Array(size * size);
+  let validParticipantCount = 0;
   let allAlpha = constrain(58 / sqrt(max(1, normalizedDrawings.length)), 9, 24);
   for (let drawing of normalizedDrawings) {
     drawNormalizedAverageStrokes(allBuffer, drawing, allAlpha, false);
     let drawingWeight = Number.isFinite(Number(drawing.weight)) ? constrain(Number(drawing.weight), 0, 1) : 1;
     drawNormalizedAverageStrokes(commonBuffer, drawing, 15 * drawingWeight, true);
+
     if (drawing.tag !== "outlier") {
-      drawNormalizedAverageStrokes(averageDensityBuffer, drawing, 15, true);
+      participantMask.clear();
+      drawNormalizedAverageStrokes(participantMask, drawing, 255, true);
+      participantMask.loadPixels();
+      for (let pixelIndex = 0; pixelIndex < pixelFrequency.length; pixelIndex++) {
+        if (participantMask.pixels[pixelIndex * 4 + 3] > 0) {
+          pixelFrequency[pixelIndex] += 1;
+        }
+      }
+      validParticipantCount++;
     }
   }
 
-  averageDensityBuffer.loadPixels();
   averageBuffer.loadPixels();
-  let alphaValues = [];
-  for (let i = 3; i < averageDensityBuffer.pixels.length; i += 4) {
-    if (averageDensityBuffer.pixels[i] > 0) alphaValues.push(averageDensityBuffer.pixels[i]);
-  }
-  alphaValues.sort((a, b) => a - b);
-  let threshold = alphaValues.length > 0
-    ? alphaValues[floor((alphaValues.length - 1) * averageThresholdQuantile)]
-    : 255;
-  let maxAlpha = alphaValues.length > 0 ? alphaValues[alphaValues.length - 1] : 255;
-
-  for (let i = 0; i < averageDensityBuffer.pixels.length; i += 4) {
-    let alpha = averageDensityBuffer.pixels[i + 3];
-    if (alpha < threshold || alpha === 0) continue;
-    let resultAlpha = maxAlpha > threshold ? map(alpha, threshold, maxAlpha, 115, 245) : 210;
-    averageBuffer.pixels[i] = 24;
-    averageBuffer.pixels[i + 1] = 22;
-    averageBuffer.pixels[i + 2] = 20;
-    averageBuffer.pixels[i + 3] = constrain(resultAlpha, 115, 245);
+  let frequencyThreshold = max(2, ceil(validParticipantCount * 0.1));
+  for (let pixelIndex = 0; pixelIndex < pixelFrequency.length; pixelIndex++) {
+    let frequency = pixelFrequency[pixelIndex];
+    if (frequency < frequencyThreshold) continue;
+    let resultAlpha = validParticipantCount > frequencyThreshold
+      ? map(frequency, frequencyThreshold, validParticipantCount, 125, 245)
+      : 210;
+    let outputIndex = pixelIndex * 4;
+    averageBuffer.pixels[outputIndex] = 24;
+    averageBuffer.pixels[outputIndex + 1] = 22;
+    averageBuffer.pixels[outputIndex + 2] = 20;
+    averageBuffer.pixels[outputIndex + 3] = constrain(resultAlpha, 125, 245);
   }
   averageBuffer.updatePixels();
 
