@@ -1586,6 +1586,8 @@ function normalizeDrawingForAverage(drawing, targetSize, padding) {
   let offsetY = (targetSize - contentH * scaleFactor) / 2;
 
   return {
+    tag: drawing.tag || null,
+    weight: Number.isFinite(Number(drawing.weight)) ? Number(drawing.weight) : 1,
     strokes: strokes.map((stroke) => ({
       color: stroke.color,
       size: constrain(stroke.size * scaleFactor, 1.4, 10),
@@ -1602,7 +1604,8 @@ function buildAverageAppleBuffers(normalizedDrawings, size) {
   let allBuffer = createGraphics(size, size);
   let commonBuffer = createGraphics(size, size);
   let averageBuffer = createGraphics(size, size);
-  for (let buffer of [allBuffer, commonBuffer, averageBuffer]) {
+  let averageDensityBuffer = createGraphics(size, size);
+  for (let buffer of [allBuffer, commonBuffer, averageBuffer, averageDensityBuffer]) {
     buffer.pixelDensity(1);
     buffer.clear();
     buffer.smooth();
@@ -1611,14 +1614,18 @@ function buildAverageAppleBuffers(normalizedDrawings, size) {
   let allAlpha = constrain(58 / sqrt(max(1, normalizedDrawings.length)), 9, 24);
   for (let drawing of normalizedDrawings) {
     drawNormalizedAverageStrokes(allBuffer, drawing, allAlpha, false);
-    drawNormalizedAverageStrokes(commonBuffer, drawing, 15, true);
+    let drawingWeight = Number.isFinite(Number(drawing.weight)) ? constrain(Number(drawing.weight), 0, 1) : 1;
+    drawNormalizedAverageStrokes(commonBuffer, drawing, 15 * drawingWeight, true);
+    if (drawing.tag !== "outlier") {
+      drawNormalizedAverageStrokes(averageDensityBuffer, drawing, 15, true);
+    }
   }
 
-  commonBuffer.loadPixels();
+  averageDensityBuffer.loadPixels();
   averageBuffer.loadPixels();
   let alphaValues = [];
-  for (let i = 3; i < commonBuffer.pixels.length; i += 4) {
-    if (commonBuffer.pixels[i] > 0) alphaValues.push(commonBuffer.pixels[i]);
+  for (let i = 3; i < averageDensityBuffer.pixels.length; i += 4) {
+    if (averageDensityBuffer.pixels[i] > 0) alphaValues.push(averageDensityBuffer.pixels[i]);
   }
   alphaValues.sort((a, b) => a - b);
   let threshold = alphaValues.length > 0
@@ -1626,8 +1633,8 @@ function buildAverageAppleBuffers(normalizedDrawings, size) {
     : 255;
   let maxAlpha = alphaValues.length > 0 ? alphaValues[alphaValues.length - 1] : 255;
 
-  for (let i = 0; i < commonBuffer.pixels.length; i += 4) {
-    let alpha = commonBuffer.pixels[i + 3];
+  for (let i = 0; i < averageDensityBuffer.pixels.length; i += 4) {
+    let alpha = averageDensityBuffer.pixels[i + 3];
     if (alpha < threshold || alpha === 0) continue;
     let resultAlpha = maxAlpha > threshold ? map(alpha, threshold, maxAlpha, 115, 245) : 210;
     averageBuffer.pixels[i] = 24;
@@ -1705,12 +1712,13 @@ function drawFloatingSliceCard(d, item) {
 }
 
 function drawArchiveTarotCard(d, item, cardW, cardH, hovered) {
+  let isOutlier = d && d.tag === "outlier";
   drawingContext.save();
   drawingContext.shadowColor = hovered ? "rgba(46, 36, 24, 0.2)" : "rgba(46, 36, 24, 0.11)";
   drawingContext.shadowBlur = hovered ? 24 : 14;
   drawingContext.shadowOffsetY = hovered ? 16 : 10;
   noStroke();
-  fill(252, 248, 238, hovered ? 220 : 186);
+  fill(252, 248, 238, isOutlier ? 128 : (hovered ? 220 : 186));
   rect(-cardW / 2, -cardH / 2, cardW, cardH, 7);
   drawingContext.restore();
 
@@ -1723,7 +1731,7 @@ function drawArchiveTarotCard(d, item, cardW, cardH, hovered) {
   push();
   translate(-imageSize / 2, -imageSize / 2 - cardH * 0.04);
   if (item.cachedThumb) {
-    tint(255, hovered ? 245 : 210);
+    tint(255, isOutlier ? 112 : (hovered ? 245 : 210));
     drawImageContained(item.cachedThumb, 0, 0, imageSize, imageSize);
     noTint();
   } else {
@@ -1733,9 +1741,43 @@ function drawArchiveTarotCard(d, item, cardW, cardH, hovered) {
 
   noStroke();
   fill(80, 73, 66, hovered ? 170 : 122);
-  textAlign(CENTER);
+  textAlign(RIGHT);
   textSize(8.5);
-  text(`#${item.archiveIndex + 1}`, 0, cardH / 2 - 20);
+  text(`#${item.archiveIndex + 1}`, cardW / 2 - 8, cardH / 2 - 20);
+
+  drawArchiveOutlierButton(d, cardW, cardH, false);
+}
+
+function getArchiveOutlierButtonRect(cardW, cardH, mobile) {
+  let buttonW = mobile ? min(104, cardW * 0.48) : min(68, cardW - 14);
+  let buttonH = mobile ? 20 : 17;
+  return {
+    x: -cardW / 2 + 7,
+    y: cardH / 2 - buttonH - (mobile ? 10 : 9),
+    w: buttonW,
+    h: buttonH
+  };
+}
+
+function drawArchiveOutlierButton(d, cardW, cardH, mobile) {
+  let marked = d && d.tag === "outlier";
+  let r = getArchiveOutlierButtonRect(cardW, cardH, mobile);
+
+  noStroke();
+  fill(marked ? 68 : 250, marked ? 63 : 247, marked ? 58 : 240, marked ? 205 : 180);
+  rect(r.x, r.y, r.w, r.h, r.h / 2);
+  if (!marked) {
+    noFill();
+    stroke(155, 145, 133, 120);
+    strokeWeight(0.8);
+    rect(r.x + 0.5, r.y + 0.5, r.w - 1, r.h - 1, r.h / 2);
+  }
+
+  noStroke();
+  fill(marked ? 250 : 91, marked ? 248 : 83, marked ? 244 : 76);
+  textAlign(CENTER, CENTER);
+  textSize(mobile ? 7.5 : 5.8);
+  text(marked ? "Restore" : "Mark as Outlier", r.x + r.w / 2, r.y + r.h / 2 + 0.5);
 }
 
 function archiveCardHitTest(px, py, item, cx, cy, cardW, cardH) {
@@ -1757,6 +1799,40 @@ function getArchiveModeCardAt(px, py) {
     if (archiveCardHitTest(px, py, item, x, y, w, h)) {
       return item.archiveIndex;
     }
+  }
+
+  return -1;
+}
+
+function pointInsideRotatedCardRect(px, py, cx, cy, rotation, rect) {
+  let dx = px - cx;
+  let dy = py - cy;
+  let cosR = cos(rotation);
+  let sinR = sin(rotation);
+  let localX = dx * cosR + dy * sinR;
+  let localY = -dx * sinR + dy * cosR;
+  return localX >= rect.x && localX <= rect.x + rect.w && localY >= rect.y && localY <= rect.y + rect.h;
+}
+
+function getArchiveOutlierButtonAt(px, py) {
+  return isMobileScreen()
+    ? getMobileArchiveOutlierButtonAt(px, py)
+    : getDesktopArchiveOutlierButtonAt(px, py);
+}
+
+function getDesktopArchiveOutlierButtonAt(px, py) {
+  if (backgroundViewMode !== "archive") return -1;
+
+  for (let i = drawBackgroundApplesLayout.length - 1; i >= 0; i--) {
+    let item = drawBackgroundApplesLayout[i];
+    let rowPan = archiveRowPan[item.rowIndex] || 0;
+    let x = lerp(item.scatterX, item.archiveX + rowPan, archiveTransition);
+    let y = lerp(item.scatterY, item.archiveY, archiveTransition) + (item.lift || 0);
+    let w = lerp(item.size, item.archiveW, archiveTransition);
+    let h = lerp(item.size, item.archiveH, archiveTransition);
+    let rotation = lerp(item.scatterRotation, item.archiveRotation, archiveTransition);
+    let button = getArchiveOutlierButtonRect(w, h, false);
+    if (pointInsideRotatedCardRect(px, py, x, y, rotation, button)) return item.archiveIndex;
   }
 
   return -1;
@@ -1885,6 +1961,7 @@ function drawMobileArchiveView() {
 }
 
 function drawMobileArchiveCard(d, archiveIndex, x, y, w, h, rotation) {
+  let isOutlier = d && d.tag === "outlier";
   push();
   translate(x + w / 2, y + h / 2);
   rotate(rotation);
@@ -1894,7 +1971,7 @@ function drawMobileArchiveCard(d, archiveIndex, x, y, w, h, rotation) {
   drawingContext.shadowBlur = 15;
   drawingContext.shadowOffsetY = 8;
   noStroke();
-  fill(252, 248, 238, 188);
+  fill(252, 248, 238, isOutlier ? 132 : 188);
   rect(-w / 2, -h / 2, w, h, 8);
   drawingContext.restore();
 
@@ -1905,7 +1982,9 @@ function drawMobileArchiveCard(d, archiveIndex, x, y, w, h, rotation) {
 
   push();
   translate(-w * 0.32, -h * 0.34);
+  if (isOutlier) tint(255, 120);
   drawStaticMini(d, w * 0.64, h * 0.68);
+  if (isOutlier) noTint();
   pop();
 
   noStroke();
@@ -1913,6 +1992,8 @@ function drawMobileArchiveCard(d, archiveIndex, x, y, w, h, rotation) {
   textAlign(RIGHT);
   textSize(10);
   text(`#${archiveIndex + 1}`, w / 2 - 16, h / 2 - 18);
+
+  drawArchiveOutlierButton(d, w, h, true);
 
   pop();
 }
@@ -1946,6 +2027,39 @@ function getMobileArchiveCardAt(px, py) {
       }
     }
 
+    y += cardH + 58;
+  }
+
+  return -1;
+}
+
+function getMobileArchiveOutlierButtonAt(px, py) {
+  let pad = 22;
+  let y = 86 - getMobileArchiveScrollY() + 62;
+  let cardW = min(width * 0.62, 240);
+  let cardH = 150;
+  let stepX = cardW * 0.72;
+
+  for (let groupIndex = 0; groupIndex < 4; groupIndex++) {
+    let group = archive
+      .map((drawing, index) => ({ drawing, index }))
+      .filter(item => getArchivePromptGroupIndex(item.drawing) === groupIndex);
+    y += 24;
+    if (group.length === 0) {
+      y += 48;
+      continue;
+    }
+
+    let rowPan = archiveRowPan[groupIndex] || 0;
+    for (let i = group.length - 1; i >= 0; i--) {
+      let cardX = pad + 8 + rowPan + i * stepX;
+      let cardY = y;
+      let rotation = radians(((i % 5) - 2) * 1.2);
+      let button = getArchiveOutlierButtonRect(cardW, cardH, true);
+      if (pointInsideRotatedCardRect(px, py, cardX + cardW / 2, cardY + cardH / 2, rotation, button)) {
+        return group[i].index;
+      }
+    }
     y += cardH + 58;
   }
 
@@ -2301,6 +2415,7 @@ function mouseReleased() {
 
 function mouseClicked() {
   if (isMobileArchiveMode() && !isClickOnViewSwitcher(mouseX, mouseY)) {
+    if (getMobileArchiveOutlierButtonAt(mouseX, mouseY) >= 0) return false;
     let hitIndex = getMobileArchiveCardAt(mouseX, mouseY);
     if (hitIndex >= 0) {
       selectArchiveDrawing(hitIndex);
@@ -2520,9 +2635,14 @@ function handlePointerReleased() {
 
   if (archiveRowDragging) {
     if (archiveRowDragDistance < 8) {
-      let hitIndex = getArchiveModeCardAt(archiveRowPressPoint.x, archiveRowPressPoint.y);
-      if (hitIndex >= 0) {
-        selectArchiveDrawing(hitIndex);
+      let outlierIndex = getArchiveOutlierButtonAt(archiveRowPressPoint.x, archiveRowPressPoint.y);
+      if (outlierIndex >= 0) {
+        toggleDrawingOutlier(outlierIndex);
+      } else {
+        let hitIndex = isMobileScreen()
+          ? getMobileArchiveCardAt(archiveRowPressPoint.x, archiveRowPressPoint.y)
+          : getArchiveModeCardAt(archiveRowPressPoint.x, archiveRowPressPoint.y);
+        if (hitIndex >= 0) selectArchiveDrawing(hitIndex);
       }
     }
     if (abs(archiveRowVelocity[archiveRowDragIndex] || 0) < 0.02) {
@@ -2544,9 +2664,12 @@ function handlePointerReleased() {
 
   if (isArchivePanning) {
     if (isMobileArchiveMode() && mobileArchiveDragDistance < 8) {
-      let hitIndex = getMobileArchiveCardAt(mobileArchivePressPoint.x, mobileArchivePressPoint.y);
-      if (hitIndex >= 0) {
-        selectArchiveDrawing(hitIndex);
+      let outlierIndex = getMobileArchiveOutlierButtonAt(mobileArchivePressPoint.x, mobileArchivePressPoint.y);
+      if (outlierIndex >= 0) {
+        toggleDrawingOutlier(outlierIndex);
+      } else {
+        let hitIndex = getMobileArchiveCardAt(mobileArchivePressPoint.x, mobileArchivePressPoint.y);
+        if (hitIndex >= 0) selectArchiveDrawing(hitIndex);
       }
     }
     isArchivePanning = false;
@@ -3348,6 +3471,45 @@ function saveArchive() {
     localStorage.setItem(storageKey, JSON.stringify(archive));
   } catch (error) {
     console.warn("Could not save archive to localStorage:", error);
+  }
+}
+
+function toggleDrawingOutlier(index) {
+  let drawing = archive[index];
+  if (!drawing) return;
+
+  let markAsOutlier = drawing.tag !== "outlier";
+  if (markAsOutlier) {
+    drawing.tag = "outlier";
+    drawing.weight = 0.2;
+  } else {
+    delete drawing.tag;
+    drawing.weight = 1;
+  }
+
+  if (selectedAppleIndex === index) selectedApple = drawing;
+  saveArchive();
+  invalidateAverageAppleCache();
+  persistDrawingOutlierState(drawing, markAsOutlier);
+}
+
+async function persistDrawingOutlierState(drawing, marked) {
+  if (!drawing || !drawing.dbId) return;
+
+  try {
+    let response = await fetch(`/api/drawings/${drawing.dbId}`, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        tag: marked ? "outlier" : null,
+        weight: marked ? 0.2 : 1
+      })
+    });
+    if (!response.ok) throw new Error(await response.text());
+  } catch (error) {
+    console.warn("Could not persist outlier state. The local state is still saved:", drawing.dbId, error);
   }
 }
 

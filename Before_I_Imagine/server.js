@@ -259,10 +259,22 @@ app.patch("/api/drawings/:id", async (req, res) => {
     });
   }
 
-  const { preview } = req.body || {};
+  const { preview, tag, weight } = req.body || {};
+  const hasPreview = preview !== undefined;
+  const hasTag = tag !== undefined;
+  const hasWeight = weight !== undefined;
 
-  if (typeof preview !== "string" || !preview.startsWith("data:image/")) {
+  if (!hasPreview && !hasTag && !hasWeight) {
+    return res.status(400).json({ error: "No drawing fields supplied." });
+  }
+  if (hasPreview && (typeof preview !== "string" || !preview.startsWith("data:image/"))) {
     return res.status(400).json({ error: "Invalid preview data." });
+  }
+  if (hasTag && tag !== null && tag !== "outlier") {
+    return res.status(400).json({ error: "Invalid drawing tag." });
+  }
+  if (hasWeight && (!Number.isFinite(Number(weight)) || Number(weight) < 0 || Number(weight) > 1)) {
+    return res.status(400).json({ error: "Invalid drawing weight." });
   }
 
   const { data: existing, error: selectError } = await supabase
@@ -278,10 +290,13 @@ app.patch("/api/drawings/:id", async (req, res) => {
   const drawing = existing && existing.drawing && typeof existing.drawing === "object"
     ? existing.drawing
     : {};
-  const updatedDrawing = {
-    ...drawing,
-    preview
-  };
+  const updatedDrawing = { ...drawing };
+  if (hasPreview) updatedDrawing.preview = preview;
+  if (hasTag) {
+    if (tag === null) delete updatedDrawing.tag;
+    else updatedDrawing.tag = tag;
+  }
+  if (hasWeight) updatedDrawing.weight = Number(weight);
 
   const { data, error } = await supabase
     .from("drawings")
