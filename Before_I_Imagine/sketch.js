@@ -1341,10 +1341,18 @@ function getAverageAppleLayout() {
   ];
   let saveGap = isMobileScreen() ? 6 : 12;
   let saveW = isMobileScreen() ? 82 : 104;
-  let availableControlsW = contentW - (isMobileScreen() ? 24 : 64);
-  let viewW = min(isMobileScreen() ? 88 : 132, (availableControlsW - saveW - saveGap - viewGap * 2) / 3);
-  let controlsTotalW = viewW * 3 + viewGap * 2 + saveGap + saveW;
-  let viewX = contentX + (contentW - controlsTotalW) / 2;
+  let viewW;
+  let viewX;
+  if (isMobileScreen()) {
+    let availableControlsW = contentW - 24;
+    viewW = min(88, (availableControlsW - saveW - saveGap - viewGap * 2) / 3);
+    let controlsTotalW = viewW * 3 + viewGap * 2 + saveGap + saveW;
+    viewX = contentX + (contentW - controlsTotalW) / 2;
+  } else {
+    viewW = min(142, (contentW - 32 - viewGap * 2) / 3);
+    let viewTotalW = viewW * 3 + viewGap * 2;
+    viewX = contentX + (contentW - viewTotalW) / 2;
+  }
   let viewTabs = viewLabels.map((item, index) => ({
     type: "view",
     value: item.value,
@@ -1354,16 +1362,26 @@ function getAverageAppleLayout() {
     w: viewW,
     h: isMobileScreen() ? 28 : 30
   }));
-  let saveButton = {
-    x: viewX + viewW * 3 + viewGap * 2 + saveGap,
-    y: viewY,
-    w: saveW,
-    h: isMobileScreen() ? 28 : 30
-  };
-
   let panelTop = viewY + (isMobileScreen() ? 48 : 56);
   let maxPanel = min(contentW - (isMobileScreen() ? 30 : 100), height - panelTop - 34);
   let panelSize = constrain(maxPanel, isMobileScreen() ? 230 : 300, isMobileScreen() ? 430 : 620);
+  let panel = {
+    x: contentX + (contentW - panelSize) / 2,
+    y: panelTop,
+    w: panelSize,
+    h: panelSize
+  };
+  let saveButton = isMobileScreen() ? {
+    x: viewX + viewW * 3 + viewGap * 2 + saveGap,
+    y: viewY,
+    w: saveW,
+    h: 28
+  } : {
+    x: min(width - saveW - 24, panel.x + panel.w + 24),
+    y: panel.y + panel.h * 0.42,
+    w: saveW,
+    h: 30
+  };
 
   return {
     contentX: contentX,
@@ -1371,12 +1389,7 @@ function getAverageAppleLayout() {
     promptTabs: promptTabs,
     viewTabs: viewTabs,
     saveButton: saveButton,
-    panel: {
-      x: contentX + (contentW - panelSize) / 2,
-      y: panelTop,
-      w: panelSize,
-      h: panelSize
-    }
+    panel: panel
   };
 }
 
