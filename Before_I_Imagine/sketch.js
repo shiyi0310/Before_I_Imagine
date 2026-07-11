@@ -147,6 +147,8 @@ let archiveReplayState = null;
 let archiveReplayKey = "";
 let archiveReplayPausedUntil = 0;
 let archiveReplayLoading = {};
+let archiveRowAutoPanTarget = [null, null, null, null];
+let archiveRowManualPauseUntil = [0, 0, 0, 0];
 let archiveScrollModeActive = false;
 let layerReplayIndex = 0;
 let maxLayerUnits = 0;
@@ -229,6 +231,7 @@ function draw() {
   applyCanvasTypography();
   updateMobileArchiveScrollMode();
   updateArchiveRowInertia();
+  updateArchiveRowAutoFollow();
   archiveTargetTransition = (!modalOpen && backgroundViewMode === "archive") ? 1 : 0;
   archiveTransition = lerp(archiveTransition, archiveTargetTransition, 0.06);
 
@@ -2320,6 +2323,8 @@ function getArchiveReplayKey() {
 function resetArchiveFilmReplay() {
   archiveReplayKey = getArchiveReplayKey();
   archiveReplayLoading = {};
+  archiveRowAutoPanTarget = [null, null, null, null];
+  archiveRowManualPauseUntil = [0, 0, 0, 0];
   archiveReplayState = {
     active: [-1, -1, -1, -1],
     cursor: [0, 0, 0, 0],
@@ -2388,11 +2393,73 @@ function updateArchiveFilmReplay() {
         archiveReplayState.cursor[row] += 1;
         continue;
       }
-      if (!archiveFilmItemVisible(item)) break;
+      if (!archiveFilmItemReadyToReplay(item)) {
+        requestArchiveRowAutoFollow(row, item);
+        break;
+      }
+      archiveRowAutoPanTarget[row] = null;
       archiveReplayState.active[row] = item.archiveIndex;
       archiveReplayState.startedAt[row] = millis();
       break;
     }
+  }
+}
+
+function archiveFilmItemReadyToReplay(item) {
+  if (!item) return false;
+  if (millis() < (archiveRowManualPauseUntil[item.rowIndex] || 0)) return false;
+  let target = getArchiveRowPanForItem(item);
+  let current = archiveRowPan[item.rowIndex] || 0;
+  return abs(current - target) < 1.2;
+}
+
+function getArchiveRowPanForItem(item) {
+  let bounds = getArchiveRowPanBounds(item.rowIndex);
+  let frame = getArchiveVisibleRowFrame();
+  let desiredX = frame.x + frame.w * 0.42;
+  let target = desiredX - item.archiveX;
+  return constrain(target, bounds.min, bounds.max);
+}
+
+function getArchiveVisibleRowFrame() {
+  if (isMobileScreen()) {
+    return { x: 20, y: 0, w: width - 40, h: height };
+  }
+  let sidebarW = getDrawSidebarWidth();
+  let left = sidebarW + 64;
+  let right = width - 56;
+  return { x: left, y: 0, w: max(1, right - left), h: height };
+}
+
+function requestArchiveRowAutoFollow(rowIndex, item) {
+  if (!item) return;
+  if (millis() < (archiveRowManualPauseUntil[rowIndex] || 0)) return;
+  archiveRowAutoPanTarget[rowIndex] = getArchiveRowPanForItem(item);
+}
+
+function markArchiveRowManualInteraction(rowIndex) {
+  if (rowIndex < 0 || rowIndex >= archiveRowManualPauseUntil.length) return;
+  archiveRowManualPauseUntil[rowIndex] = millis() + 2500;
+  archiveRowAutoPanTarget[rowIndex] = null;
+}
+
+function updateArchiveRowAutoFollow() {
+  if (modalOpen || backgroundViewMode !== "archive" || archiveRowDragging) return;
+
+  for (let row = 0; row < archiveRowAutoPanTarget.length; row++) {
+    let target = archiveRowAutoPanTarget[row];
+    if (target === null || target === undefined) continue;
+    if (millis() < (archiveRowManualPauseUntil[row] || 0)) continue;
+    if (abs(archiveRowVelocity[row] || 0) > 0.05) continue;
+
+    let current = archiveRowPan[row] || 0;
+    let next = lerp(current, target, 0.18);
+    if (abs(next - target) < 0.8) {
+      next = target;
+      archiveRowAutoPanTarget[row] = null;
+    }
+    let bounds = getArchiveRowPanBounds(row);
+    archiveRowPan[row] = constrain(next, bounds.min, bounds.max);
   }
 }
 
@@ -3123,6 +3190,7 @@ function handlePointerPressed(x, y) {
 
   let archiveRow = getArchiveRowAt(x, y);
   if (archiveRow >= 0) {
+    markArchiveRowManualInteraction(archiveRow);
     archiveRowDragging = true;
     archiveRowDragIndex = archiveRow;
     archiveRowLastX = x;
@@ -3190,6 +3258,7 @@ function handlePointerDragged(x, y) {
 
   if (archiveRowDragging) {
     archiveReplayPausedUntil = millis() + 500;
+    markArchiveRowManualInteraction(archiveRowDragIndex);
     let dx = x - archiveRowLastX;
     let now = millis();
     let dt = max(16, now - archiveRowLastMoveTime);
@@ -3264,6 +3333,7 @@ function handlePointerReleased() {
   }
 
   if (archiveRowDragging) {
+    markArchiveRowManualInteraction(archiveRowDragIndex);
     if (archiveRowDragDistance < 8) {
       let outlierIndex = getArchiveOutlierButtonAt(archiveRowPressPoint.x, archiveRowPressPoint.y);
       if (outlierIndex >= 0) {
@@ -3716,6 +3786,7 @@ function mouseWheel(event) {
     let row = getArchiveRowAt(mouseX, mouseY);
     if (row >= 0) {
       let delta = abs(event.deltaX || 0) > abs(event.deltaY || 0) ? event.deltaX : event.delta;
+      markArchiveRowManualInteraction(row);
       applyArchiveRowPanDelta(row, -delta, true);
       archiveRowVelocity[row] = -delta * 0.18;
       archiveReplayPausedUntil = millis() + 500;
