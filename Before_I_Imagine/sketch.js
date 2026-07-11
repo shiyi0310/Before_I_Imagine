@@ -51,6 +51,13 @@ let archiveTaskTitles = [
 
 let promptIndex = 0;
 let promptFlowSaving = false;
+let reflectionModalOpen = false;
+let reflectionSavedDrawing = null;
+let reflectionTextArea;
+let reflectionSkipBtn;
+let reflectionContinueBtn;
+let reflectionError = "";
+let reflectionUpdating = false;
 let lastUndoTime = 0;
 
 let actions = [];
@@ -269,6 +276,8 @@ function createInterface() {
   nextPromptBtn = createButton("Next<br>下一题");
   nextPromptBtn.mousePressed(nextPrompt);
 
+  createReflectionInterface();
+
   archiveBtn = createButton("Archive<br>档案库");
   archiveBtn.mousePressed(() => {
     page = "archiveWall";
@@ -446,6 +455,83 @@ function layoutInterface() {
     exportBtn.size(archiveNavW, 28);
   }
 
+  layoutReflectionInterface();
+
+}
+
+function createReflectionInterface() {
+  reflectionTextArea = createElement("textarea", "");
+  reflectionTextArea.attribute("placeholder", "I was thinking about...");
+  reflectionTextArea.style("position", "absolute");
+  reflectionTextArea.style("resize", "none");
+  reflectionTextArea.style("box-sizing", "border-box");
+  reflectionTextArea.style("font-family", interfaceFont);
+  reflectionTextArea.style("font-size", "13px");
+  reflectionTextArea.style("line-height", "1.35");
+  reflectionTextArea.style("padding", "10px 12px");
+  reflectionTextArea.style("border", "1px solid rgba(43, 41, 38, 0.45)");
+  reflectionTextArea.style("border-radius", "8px");
+  reflectionTextArea.style("background", "rgba(251, 250, 246, 0.94)");
+  reflectionTextArea.style("color", inkCol);
+  reflectionTextArea.style("outline", "none");
+  reflectionTextArea.style("z-index", "260");
+  reflectionTextArea.style("pointer-events", "auto");
+  reflectionTextArea.style("touch-action", "manipulation");
+  reflectionTextArea.hide();
+
+  reflectionSkipBtn = createButton("Skip<br>跳过");
+  reflectionSkipBtn.mousePressed(() => handleReflectionChoice(false));
+  reflectionContinueBtn = createButton("Continue<br>继续");
+  reflectionContinueBtn.mousePressed(() => handleReflectionChoice(true));
+
+  for (let btn of [reflectionSkipBtn, reflectionContinueBtn]) {
+    styleButton(btn);
+    btn.style("position", "absolute");
+    btn.style("height", "auto");
+    btn.style("min-height", "42px");
+    btn.style("border-radius", "999px");
+    btn.style("font-size", "12px");
+    btn.style("padding", "8px 16px");
+    btn.style("z-index", "260");
+    btn.style("pointer-events", "auto");
+    btn.style("touch-action", "manipulation");
+  }
+  reflectionSkipBtn.hide();
+  reflectionContinueBtn.hide();
+  reflectionSkipBtn.style("background", "rgba(251, 250, 246, 0.88)");
+  reflectionSkipBtn.style("color", inkCol);
+  reflectionContinueBtn.style("background", "#222");
+  reflectionContinueBtn.style("color", "#fff");
+}
+
+function getReflectionModalRect() {
+  let modalW = isMobileScreen() ? max(280, width - 40) : 460;
+  let modalH = isMobileScreen() ? 292 : 300;
+  return {
+    x: (width - modalW) / 2,
+    y: (height - modalH) / 2,
+    w: modalW,
+    h: modalH
+  };
+}
+
+function layoutReflectionInterface() {
+  if (!reflectionTextArea || !reflectionSkipBtn || !reflectionContinueBtn) return;
+  let r = getReflectionModalRect();
+  let pad = isMobileScreen() ? 20 : 24;
+  let textY = r.y + (isMobileScreen() ? 128 : 132);
+  let textH = isMobileScreen() ? 86 : 92;
+  let btnW = isMobileScreen() ? 112 : 124;
+  let btnH = 42;
+  let gap = 12;
+  let buttonY = r.y + r.h - pad - btnH;
+
+  reflectionTextArea.position(r.x + pad, textY);
+  reflectionTextArea.size(r.w - pad * 2, textH);
+  reflectionSkipBtn.position(r.x + r.w - pad - btnW * 2 - gap, buttonY);
+  reflectionContinueBtn.position(r.x + r.w - pad - btnW, buttonY);
+  reflectionSkipBtn.size(btnW, btnH);
+  reflectionContinueBtn.size(btnW, btnH);
 }
 
 function styleButton(btn) {
@@ -569,9 +655,10 @@ function updatePromptFlowButtonLabel() {
 
 function updateButtonVisibility() {
   updatePromptFlowButtonLabel();
+  updateReflectionVisibility();
 
   if (page === "draw") {
-    if (modalOpen) {
+    if (modalOpen && !reflectionModalOpen) {
       colorPicker.show();
       sizeSlider.show();
 
@@ -627,6 +714,20 @@ function updateButtonVisibility() {
     stackBtn.hide();
     exportBtn.hide();
     //clearArchiveBtn.show();
+  }
+}
+
+function updateReflectionVisibility() {
+  if (!reflectionTextArea || !reflectionSkipBtn || !reflectionContinueBtn) return;
+  if (reflectionModalOpen) {
+    layoutReflectionInterface();
+    reflectionTextArea.show();
+    reflectionSkipBtn.show();
+    reflectionContinueBtn.show();
+  } else {
+    reflectionTextArea.hide();
+    reflectionSkipBtn.hide();
+    reflectionContinueBtn.hide();
   }
 }
 
@@ -775,6 +876,61 @@ function drawImmersiveDrawingPage() {
     drawSelectedApplePopup();
   }
 
+  if (reflectionModalOpen) {
+    drawReflectionModal();
+  }
+
+}
+
+function drawReflectionModal() {
+  layoutReflectionInterface();
+  let r = getReflectionModalRect();
+
+  drawingContext.save();
+  drawingContext.filter = "blur(0px)";
+  noStroke();
+  fill(244, 241, 235, 118);
+  rect(0, 0, width, height);
+  drawingContext.restore();
+
+  drawingContext.save();
+  drawingContext.shadowColor = "rgba(42, 35, 25, 0.16)";
+  drawingContext.shadowBlur = 24;
+  drawingContext.shadowOffsetY = 12;
+  noStroke();
+  fill(251, 250, 246, 238);
+  rect(r.x, r.y, r.w, r.h, 12);
+  drawingContext.restore();
+
+  noFill();
+  stroke(43, 41, 38, 70);
+  strokeWeight(1);
+  rect(r.x + 0.5, r.y + 0.5, r.w - 1, r.h - 1, 12);
+
+  let pad = isMobileScreen() ? 20 : 24;
+  fill(inkCol);
+  noStroke();
+  textAlign(LEFT, TOP);
+  textSize(11);
+  text("REFLECTION / 想法", r.x + pad, r.y + pad);
+
+  textSize(isMobileScreen() ? 15 : 16);
+  textStyle(BOLD);
+  text("What were you thinking about while drawing this apple?", r.x + pad, r.y + pad + 34, r.w - pad * 2);
+  textStyle(NORMAL);
+  textSize(isMobileScreen() ? 13 : 14);
+  text("画这个苹果时，你想到了什么？", r.x + pad, r.y + pad + 58, r.w - pad * 2);
+
+  fill(mutedCol);
+  textSize(12);
+  text("Images, memories, feelings, or concerns.", r.x + pad, r.y + pad + 86, r.w - pad * 2);
+  text("可以写下你想到的图像、记忆、感受或担忧。", r.x + pad, r.y + pad + 104, r.w - pad * 2);
+
+  if (reflectionError) {
+    fill(146, 48, 36);
+    textSize(11);
+    text(reflectionError, r.x + pad, r.y + r.h - pad - 60, r.w - pad * 2);
+  }
 }
 
 function drawPaperBackground() {
@@ -2664,6 +2820,10 @@ function touchEnded() {
 }
 
 function handlePointerPressed(x, y) {
+  if (reflectionModalOpen) {
+    return true;
+  }
+
   if (page === "stack" && handleStackControlPress(x, y)) {
     return true;
   }
@@ -2728,6 +2888,10 @@ function handlePointerPressed(x, y) {
 }
 
 function handlePointerDragged(x, y) {
+  if (reflectionModalOpen) {
+    return false;
+  }
+
   if (page === "draw" && pointInsideUndoButton(x, y)) {
     return false;
   }
@@ -2804,6 +2968,11 @@ function handlePointerDragged(x, y) {
 }
 
 function handlePointerReleased() {
+  if (reflectionModalOpen) {
+    currentAction = null;
+    return;
+  }
+
   if (archiveSliceDragging) {
     archiveSliceDragging = false;
   }
@@ -3308,7 +3477,7 @@ function mouseInsideDrawingArea() {
 }
 
 function pointInsideDrawingArea(x, y) {
-  if (!modalOpen) return false;
+  if (!modalOpen || reflectionModalOpen) return false;
   drawLayout = getDrawingLayout();
   return (
     x >= drawLayout.drawX &&
@@ -3538,8 +3707,11 @@ async function saveCurrentDrawing() {
   }
   markStackDirty();
   await saveDrawingToCloud(drawingData);
+  if (!drawingData.dbId) {
+    return false;
+  }
 
-  return true;
+  return drawingData;
 }
 
 function clearDrawing() {
@@ -3604,21 +3776,84 @@ async function nextPrompt() {
 }
 
 async function completePromptFlowStep() {
-  if (promptFlowSaving) return;
+  if (promptFlowSaving || reflectionModalOpen) return;
   promptFlowSaving = true;
 
   try {
-    let saved = await saveCurrentDrawing();
-    if (!saved) {
-      alert("Please draw something first.");
+    let savedDrawing = await saveCurrentDrawing();
+    if (!savedDrawing) {
+      alert(actions.length === 0 ? "Please draw something first." : "Could not save this drawing. Please try again.");
       return;
     }
 
-    advancePrompt();
+    openReflectionModal(savedDrawing);
   } finally {
     promptFlowSaving = false;
     updatePromptFlowButtonLabel();
   }
+}
+
+function openReflectionModal(savedDrawing) {
+  reflectionSavedDrawing = savedDrawing;
+  reflectionModalOpen = true;
+  reflectionError = "";
+  reflectionUpdating = false;
+  currentAction = null;
+  if (reflectionTextArea) reflectionTextArea.value("");
+  layoutReflectionInterface();
+  updateReflectionVisibility();
+}
+
+async function handleReflectionChoice(shouldSaveText) {
+  if (reflectionUpdating || !reflectionModalOpen || !reflectionSavedDrawing) return;
+  reflectionUpdating = true;
+  reflectionError = "";
+
+  try {
+    let textValue = shouldSaveText && reflectionTextArea
+      ? reflectionTextArea.value().trim()
+      : "";
+    await updateDrawingReflection(reflectionSavedDrawing, textValue || null);
+    reflectionSavedDrawing.reflection_text = textValue || null;
+    saveArchive();
+    closeReflectionModalAndAdvance();
+  } catch (error) {
+    console.warn("Could not save reflection:", error);
+    reflectionError = "Could not save this reflection. Please try again or skip.";
+  } finally {
+    reflectionUpdating = false;
+  }
+}
+
+async function updateDrawingReflection(drawing, reflectionText) {
+  if (!drawing || !drawing.dbId) {
+    throw new Error("Missing saved drawing record id.");
+  }
+
+  let response = await fetch(`/api/drawings/${drawing.dbId}`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      reflection_text: reflectionText
+    })
+  });
+
+  if (!response.ok) {
+    throw new Error(await response.text());
+  }
+
+  return response.json();
+}
+
+function closeReflectionModalAndAdvance() {
+  reflectionModalOpen = false;
+  reflectionSavedDrawing = null;
+  reflectionError = "";
+  if (reflectionTextArea) reflectionTextArea.value("");
+  updateReflectionVisibility();
+  advancePrompt();
 }
 
 function advancePrompt() {
@@ -3793,9 +4028,11 @@ async function saveDrawingToCloud(drawingData) {
       drawingData.thumb_url = saved.thumb_url || null;
       saveArchive();
     }
+    return saved || null;
   } catch (error) {
     console.warn("Could not save drawing to server. It is still saved locally:", error);
   }
+  return null;
 }
 
 function getCurrentDrawingExportArea() {

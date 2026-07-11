@@ -36,7 +36,8 @@ function attachDatabaseFields(row) {
     dbId: row.id,
     dbCreatedAt: row.created_at,
     image_url: row.image_url || null,
-    thumb_url: row.thumb_url || null
+    thumb_url: row.thumb_url || null,
+    reflection_text: row.reflection_text || drawing.reflection_text || null
   };
 }
 
@@ -59,7 +60,8 @@ function attachLightDatabaseFields(row) {
     dbCreatedAt: row.created_at,
     createdAt: light.createdAt || row.created_at,
     image_url: row.image_url || null,
-    thumb_url: row.thumb_url || null
+    thumb_url: row.thumb_url || null,
+    reflection_text: row.reflection_text || light.reflection_text || null
   };
 }
 
@@ -109,7 +111,7 @@ app.get("/api/drawings", async (req, res) => {
 
   const { data, error } = await supabase
     .from("drawings")
-    .select("id, created_at, drawing, image_url, thumb_url")
+    .select("id, created_at, drawing, image_url, thumb_url, reflection_text")
     .order("created_at", { ascending: true });
 
   if (error) {
@@ -129,7 +131,7 @@ app.get("/api/drawings/missing-images", async (req, res) => {
   const limit = Math.min(Math.max(Number(req.query.limit) || 10, 1), 25);
   const { data, error, count } = await supabase
     .from("drawings")
-    .select("id, created_at, drawing, image_url, thumb_url", { count: "exact" })
+    .select("id, created_at, drawing, image_url, thumb_url, reflection_text", { count: "exact" })
     .or("image_url.is.null,thumb_url.is.null")
     .order("created_at", { ascending: true })
     .limit(limit);
@@ -153,7 +155,7 @@ app.get("/api/drawings/:id", async (req, res) => {
 
   const { data, error } = await supabase
     .from("drawings")
-    .select("id, created_at, drawing, image_url, thumb_url")
+    .select("id, created_at, drawing, image_url, thumb_url, reflection_text")
     .eq("id", req.params.id)
     .single();
 
@@ -186,14 +188,15 @@ app.post("/api/drawings", async (req, res) => {
   const storedDrawing = {
     ...drawing,
     image_url: imageUrl,
-    thumb_url: thumbUrl
+    thumb_url: thumbUrl,
+    reflection_text: drawing.reflection_text || null
   };
   delete storedDrawing.preview;
 
   const { data, error } = await supabase
     .from("drawings")
-    .insert([{ drawing: storedDrawing, image_url: imageUrl, thumb_url: thumbUrl }])
-    .select("id, created_at, drawing, image_url, thumb_url")
+    .insert([{ drawing: storedDrawing, image_url: imageUrl, thumb_url: thumbUrl, reflection_text: storedDrawing.reflection_text || null }])
+    .select("id, created_at, drawing, image_url, thumb_url, reflection_text")
     .single();
 
   if (error) {
@@ -214,7 +217,7 @@ app.patch("/api/drawings/:id/images", async (req, res) => {
 
   const { data: existing, error: selectError } = await supabase
     .from("drawings")
-    .select("id, created_at, drawing, image_url, thumb_url")
+    .select("id, created_at, drawing, image_url, thumb_url, reflection_text")
     .eq("id", req.params.id)
     .single();
 
@@ -242,7 +245,7 @@ app.patch("/api/drawings/:id/images", async (req, res) => {
       thumb_url: existing.thumb_url || thumbUrl || null
     })
     .eq("id", req.params.id)
-    .select("id, created_at, drawing, image_url, thumb_url")
+    .select("id, created_at, drawing, image_url, thumb_url, reflection_text")
     .single();
 
   if (error) {
@@ -259,12 +262,13 @@ app.patch("/api/drawings/:id", async (req, res) => {
     });
   }
 
-  const { preview, tag, weight } = req.body || {};
+  const { preview, tag, weight, reflection_text } = req.body || {};
   const hasPreview = preview !== undefined;
   const hasTag = tag !== undefined;
   const hasWeight = weight !== undefined;
+  const hasReflectionText = reflection_text !== undefined;
 
-  if (!hasPreview && !hasTag && !hasWeight) {
+  if (!hasPreview && !hasTag && !hasWeight && !hasReflectionText) {
     return res.status(400).json({ error: "No drawing fields supplied." });
   }
   if (hasPreview && (typeof preview !== "string" || !preview.startsWith("data:image/"))) {
@@ -276,10 +280,13 @@ app.patch("/api/drawings/:id", async (req, res) => {
   if (hasWeight && (!Number.isFinite(Number(weight)) || Number(weight) < 0 || Number(weight) > 1)) {
     return res.status(400).json({ error: "Invalid drawing weight." });
   }
+  if (hasReflectionText && reflection_text !== null && typeof reflection_text !== "string") {
+    return res.status(400).json({ error: "Invalid reflection text." });
+  }
 
   const { data: existing, error: selectError } = await supabase
     .from("drawings")
-    .select("id, created_at, drawing, image_url, thumb_url")
+    .select("id, created_at, drawing, image_url, thumb_url, reflection_text")
     .eq("id", req.params.id)
     .single();
 
@@ -297,12 +304,16 @@ app.patch("/api/drawings/:id", async (req, res) => {
     else updatedDrawing.tag = tag;
   }
   if (hasWeight) updatedDrawing.weight = Number(weight);
+  if (hasReflectionText) updatedDrawing.reflection_text = reflection_text || null;
+
+  const updateData = { drawing: updatedDrawing };
+  if (hasReflectionText) updateData.reflection_text = reflection_text || null;
 
   const { data, error } = await supabase
     .from("drawings")
-    .update({ drawing: updatedDrawing })
+    .update(updateData)
     .eq("id", req.params.id)
-    .select("id, created_at, drawing, image_url, thumb_url")
+    .select("id, created_at, drawing, image_url, thumb_url, reflection_text")
     .single();
 
   if (error) {
