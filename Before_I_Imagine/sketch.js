@@ -986,15 +986,15 @@ function drawReflectionModal() {
 
   textSize(isMobileScreen() ? 15 : 16);
   textStyle(BOLD);
-  text("What were you thinking about while drawing this apple?", r.x + pad, layout.questionY, r.w - pad * 2);
+  text("While drawing this apple, did any specific memory, image, sensation, or detail come to mind?", r.x + pad, layout.questionY, r.w - pad * 2);
   textStyle(NORMAL);
   textSize(isMobileScreen() ? 13 : 14);
-  text("画这个苹果时，你想到了什么？", r.x + pad, layout.questionY + 24, r.w - pad * 2);
+  text("画这个苹果时，有任何具体的记忆、画面、感觉或细节出现在脑海里吗？", r.x + pad, layout.questionY + 24, r.w - pad * 2);
 
   fill(mutedCol);
   textSize(12);
-  text("Images, memories, feelings, or concerns.", r.x + pad, layout.supportY, r.w - pad * 2);
-  text("可以写下你想到的图像、记忆、感受或担忧。", r.x + pad, layout.supportY + 18, r.w - pad * 2);
+  text("You can also write “nothing in particular.", r.x + pad, layout.supportY, r.w - pad * 2);
+  text("也可以填写“没有特别想到什么“。", r.x + pad, layout.supportY + 18, r.w - pad * 2);
 
   if (reflectionError) {
     fill(146, 48, 36);
