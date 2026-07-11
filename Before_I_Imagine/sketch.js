@@ -104,6 +104,14 @@ function isMobileScreen() {
   return width < 700;
 }
 
+function isCompactDesktop() {
+  return !isMobileScreen() && width < 1280;
+}
+
+function shouldWrapDesktopToolbar() {
+  return !isMobileScreen() && drawLayout && drawLayout.toolbarW < 700;
+}
+
 function updateHeaderHeight() {
   headerH = isMobileScreen() ? 260 : 300;
 }
@@ -376,27 +384,37 @@ function layoutInterface() {
     exportBtn.position(archiveNavX + (archiveNavW + archiveNavGap) * 5, 92);
 
   } else {
-    let y = drawLayout.toolbarY + 28;
-    let x = drawLayout.toolbarX + 18;
-    let gap = 8;
-    let toolBtnW = 86;
-    let clearBtnW = 78;
-    let nextBtnW = 132;
+    let wrapToolbar = shouldWrapDesktopToolbar();
+    let innerX = drawLayout.toolbarX + 18;
+    let innerY = drawLayout.toolbarY + (wrapToolbar ? 24 : 26);
+    let innerW = drawLayout.toolbarW - 36;
+    let compact = isCompactDesktop();
+    let gap = compact ? 6 : 8;
+    let pickerW = compact ? 50 : 58;
+    let sliderW = constrain(innerW * (compact ? 0.16 : 0.18), 92, compact ? 116 : 136);
+    let toolBtnW = compact ? 70 : 78;
+    let clearBtnW = compact ? 62 : 70;
+    let nextBtnW = wrapToolbar
+      ? (compact ? 110 : 122)
+      : constrain(innerW - (pickerW + 28 + sliderW + gap * 7 + toolBtnW * 3 + clearBtnW), compact ? 96 : 112, compact ? 132 : 156);
 
-    colorPicker.position(x, y + 18);
-    colorPicker.size(58, 30);
-    sizeSlider.position(x + 96, y + 26);
-    sizeSlider.size(128);
+    colorPicker.position(innerX, innerY + 18);
+    colorPicker.size(pickerW, 30);
+    sizeSlider.position(innerX + pickerW + 34, innerY + 26);
+    sizeSlider.size(sliderW);
 
-    let toolX = x + 252;
-    brushBtn.position(toolX, y);
-    bucketBtn.position(toolX + (toolBtnW + gap), y);
-    eraserBtn.position(toolX + (toolBtnW + gap) * 2, y);
+    let toolX = innerX + pickerW + 34 + sliderW + gap * 3;
+    brushBtn.position(toolX, innerY);
+    bucketBtn.position(toolX + (toolBtnW + gap), innerY);
+    eraserBtn.position(toolX + (toolBtnW + gap) * 2, innerY);
 
-    let actionX = toolX + (toolBtnW + gap) * 3 + 10;
-    clearBtn.position(actionX, y);
+    let actionX = wrapToolbar
+      ? drawLayout.toolbarX + drawLayout.toolbarW - 18 - clearBtnW - gap - nextBtnW
+      : toolX + (toolBtnW + gap) * 3 + gap;
+    let actionY = wrapToolbar ? drawLayout.toolbarY + 84 : innerY;
+    clearBtn.position(actionX, actionY);
     submitBtn.position(-9999, -9999);
-    nextPromptBtn.position(actionX + clearBtnW + gap, y);
+    nextPromptBtn.position(actionX + clearBtnW + gap, actionY);
     archiveBtn.position(-9999, -9999);
     undoBtn.position(drawLayout.drawX + drawLayout.drawW - 78, drawLayout.drawY + 16);
 
@@ -431,12 +449,13 @@ function layoutInterface() {
     nextPromptBtn.size(actionBtnW, 34);
     archiveBtn.size(1, 1);
   } else {
-    setDesktopButtonAutoSize(brushBtn, 78);
-    setDesktopButtonAutoSize(bucketBtn, 78);
-    setDesktopButtonAutoSize(eraserBtn, 82);
-    setDesktopButtonAutoSize(clearBtn, 70);
+    let compact = isCompactDesktop();
+    setDesktopButtonAutoSize(brushBtn, compact ? 70 : 78, compact ? "7px 10px" : "8px 14px");
+    setDesktopButtonAutoSize(bucketBtn, compact ? 70 : 78, compact ? "7px 10px" : "8px 14px");
+    setDesktopButtonAutoSize(eraserBtn, compact ? 70 : 82, compact ? "7px 10px" : "8px 14px");
+    setDesktopButtonAutoSize(clearBtn, compact ? 62 : 70, compact ? "7px 10px" : "8px 14px");
     submitBtn.size(1, 1);
-    setDesktopButtonAutoSize(nextPromptBtn, 122, "10px 16px");
+    setDesktopButtonAutoSize(nextPromptBtn, compact ? 96 : 122, compact ? "8px 10px" : "10px 16px");
     archiveBtn.size(1, 1);
   }
   sizeArchiveButton(backBtn);
@@ -483,6 +502,8 @@ function createReflectionInterface() {
   reflectionSkipBtn.mousePressed(() => handleReflectionChoice(false));
   reflectionContinueBtn = createButton("Continue<br>继续");
   reflectionContinueBtn.mousePressed(() => handleReflectionChoice(true));
+  reflectionSkipBtn.elt.addEventListener("touchend", event => handleReflectionTouchChoice(event, false), { passive: false });
+  reflectionContinueBtn.elt.addEventListener("touchend", event => handleReflectionTouchChoice(event, true), { passive: false });
 
   for (let btn of [reflectionSkipBtn, reflectionContinueBtn]) {
     styleButton(btn);
@@ -505,8 +526,15 @@ function createReflectionInterface() {
 }
 
 function getReflectionModalRect() {
-  let modalW = isMobileScreen() ? max(280, width - 40) : 460;
-  let modalH = isMobileScreen() ? 292 : 300;
+  let modalW = isMobileScreen() ? max(280, width - 40) : min(480, max(420, width - getDrawSidebarWidth() - 120));
+  let pad = isMobileScreen() ? 20 : 24;
+  let textAreaH = isMobileScreen() ? 86 : 92;
+  let buttonH = 42;
+  let errorH = reflectionError ? 20 : 0;
+  let stackButtons = isMobileScreen() && modalW < 360;
+  let buttonAreaH = stackButtons ? buttonH * 2 + 8 : buttonH;
+  let contentH = pad + 16 + 18 + 44 + 28 + 18 + textAreaH + 16 + errorH + buttonAreaH + pad;
+  let modalH = min(contentH, height - 48);
   return {
     x: (width - modalW) / 2,
     y: (height - modalH) / 2,
@@ -515,38 +543,75 @@ function getReflectionModalRect() {
   };
 }
 
-function layoutReflectionInterface() {
-  if (!reflectionTextArea || !reflectionSkipBtn || !reflectionContinueBtn) return;
+function getReflectionLayout() {
   let r = getReflectionModalRect();
   let pad = isMobileScreen() ? 20 : 24;
-  let textY = r.y + (isMobileScreen() ? 128 : 132);
-  let textH = isMobileScreen() ? 86 : 92;
-  let btnW = isMobileScreen() ? 112 : 124;
-  let btnH = 42;
+  let y = r.y + pad;
+  let labelY = y;
+  y += 34;
+  let questionY = y;
+  y += 48;
+  let supportY = y;
+  y += 46;
+  let textareaY = y;
+  let textareaH = isMobileScreen() ? 86 : 92;
+  y += textareaH + 14;
+  let errorY = y;
+  if (reflectionError) y += 22;
+  let buttonH = 42;
+  let buttonY = min(r.y + r.h - pad - buttonH, y);
   let gap = 12;
-  let buttonY = r.y + r.h - pad - btnH;
+  let stackButtons = isMobileScreen() && r.w < 360;
+  let btnW = stackButtons ? r.w - pad * 2 : min(124, (r.w - pad * 2 - gap) / 2);
 
-  reflectionTextArea.position(r.x + pad, textY);
-  reflectionTextArea.size(r.w - pad * 2, textH);
-  reflectionSkipBtn.position(r.x + r.w - pad - btnW * 2 - gap, buttonY);
-  reflectionContinueBtn.position(r.x + r.w - pad - btnW, buttonY);
-  reflectionSkipBtn.size(btnW, btnH);
-  reflectionContinueBtn.size(btnW, btnH);
+  return {
+    rect: r,
+    pad: pad,
+    labelY: labelY,
+    questionY: questionY,
+    supportY: supportY,
+    textareaX: r.x + pad,
+    textareaY: textareaY,
+    textareaW: r.w - pad * 2,
+    textareaH: textareaH,
+    errorY: errorY,
+    buttonY: buttonY,
+    buttonH: buttonH,
+    skipX: stackButtons ? r.x + pad : r.x + r.w - pad - btnW * 2 - gap,
+    continueX: stackButtons ? r.x + pad : r.x + r.w - pad - btnW,
+    continueY: stackButtons ? buttonY + buttonH + 8 : buttonY,
+    buttonW: btnW,
+    stackButtons: stackButtons
+  };
+}
+
+function layoutReflectionInterface() {
+  if (!reflectionTextArea || !reflectionSkipBtn || !reflectionContinueBtn) return;
+  let layout = getReflectionLayout();
+  reflectionTextArea.position(layout.textareaX, layout.textareaY);
+  reflectionTextArea.size(layout.textareaW, layout.textareaH);
+  reflectionSkipBtn.position(layout.skipX, layout.buttonY);
+  reflectionContinueBtn.position(layout.continueX, layout.continueY);
+  reflectionSkipBtn.size(layout.buttonW, layout.buttonH);
+  reflectionContinueBtn.size(layout.buttonW, layout.buttonH);
 }
 
 function styleButton(btn) {
   btn.style("font-size", "13px");
   btn.style("line-height", "1.18");
   btn.style("padding", "6px 12px");
-  btn.style("height", "58px");
-  btn.style("min-width", "96px");
+  btn.style("height", "auto");
+  btn.style("min-height", "44px");
+  btn.style("min-width", "56px");
+  btn.style("max-width", "100%");
+  btn.style("box-sizing", "border-box");
   btn.style("border", "1px solid #2b2926");
   btn.style("background", "#f9f6ef");
   btn.style("border-radius", "0px");
   btn.style("font-family", interfaceFont);
   btn.style("font-weight", "400");
   btn.style("letter-spacing", "0.02em");
-  btn.style("white-space", "nowrap");
+  btn.style("white-space", "normal");
   btn.style("cursor", "pointer");
   btn.style("outline-color", "rgba(80, 72, 62, 0.35)");
   btn.style("position", "absolute");
@@ -567,8 +632,11 @@ function sizeDrawingButton(btn) {
   let mobile = isMobileScreen();
   btn.size(mobile ? 72 : 68, mobile ? 34 : 52);
   btn.style("font-size", mobile ? "11px" : "12px");
-  btn.style("height", mobile ? "34px" : "52px");
+  btn.style("height", mobile ? "34px" : "auto");
+  btn.style("min-height", mobile ? "34px" : "48px");
   btn.style("min-width", mobile ? "0" : "68px");
+  btn.style("max-width", "100%");
+  btn.style("box-sizing", "border-box");
   btn.style("padding", mobile ? "2px 4px" : "6px 12px");
   btn.style("border", "1px solid #2b2926");
 }
@@ -580,10 +648,10 @@ function setDesktopButtonAutoSize(btn, minW, padding = "8px 14px") {
   btn.style("width", "auto");
   btn.style("height", "auto");
   btn.style("min-width", `${minW}px`);
-  btn.style("min-height", "52px");
+  btn.style("min-height", isCompactDesktop() ? "46px" : "52px");
   btn.style("padding", padding);
   btn.style("box-sizing", "border-box");
-  btn.style("white-space", "nowrap");
+  btn.style("white-space", isCompactDesktop() ? "normal" : "nowrap");
   btn.style("line-height", "1.15");
   btn.style("flex", "0 0 auto");
 }
@@ -777,20 +845,21 @@ function getDrawingLayout() {
     };
   }
 
-  let availableX = sidebarW;
-  let availableW = width - sidebarW;
-  let modalW = min(850, max(700, availableW - 160));
-  modalW = min(modalW, availableW - 72);
-  let modalPad = 18;
-  let cardH = 154;
-  let toolbarH = 96;
-  let gap = 18;
-  let desiredDrawH = constrain(height * 0.34, 250, 330);
+  let compact = isCompactDesktop();
+  let sideGap = compact ? 28 : 48;
+  let availableX = sidebarW + sideGap;
+  let availableW = max(320, width - sidebarW - sideGap * 2);
+  let modalW = constrain(availableW, compact ? 560 : 700, 850);
+  let modalPad = compact ? 16 : 18;
+  let cardH = compact ? 150 : 154;
+  let toolbarH = compact && modalW < 700 ? 138 : (compact ? 92 : 96);
+  let gap = compact ? 14 : 18;
+  let desiredDrawH = constrain(height * (compact ? 0.32 : 0.34), compact ? 220 : 250, compact ? 300 : 330);
   let modalH = modalPad * 2 + cardH + gap + desiredDrawH + gap + toolbarH;
-  modalH = min(modalH, height - 120);
-  let drawH = max(220, modalH - modalPad * 2 - cardH - toolbarH - gap * 2);
+  modalH = min(modalH, height - (compact ? 96 : 120));
+  let drawH = max(compact ? 190 : 220, modalH - modalPad * 2 - cardH - toolbarH - gap * 2);
   let modalX = availableX + (availableW - modalW) / 2;
-  let modalY = max(78, (height - modalH) / 2);
+  let modalY = max(compact ? 70 : 78, (height - modalH) / 2);
   let cardX = modalX + modalPad;
   let cardY = modalY + modalPad;
   let contentW = modalW - modalPad * 2;
@@ -884,7 +953,8 @@ function drawImmersiveDrawingPage() {
 
 function drawReflectionModal() {
   layoutReflectionInterface();
-  let r = getReflectionModalRect();
+  let layout = getReflectionLayout();
+  let r = layout.rect;
 
   drawingContext.save();
   drawingContext.filter = "blur(0px)";
@@ -907,29 +977,29 @@ function drawReflectionModal() {
   strokeWeight(1);
   rect(r.x + 0.5, r.y + 0.5, r.w - 1, r.h - 1, 12);
 
-  let pad = isMobileScreen() ? 20 : 24;
+  let pad = layout.pad;
   fill(inkCol);
   noStroke();
   textAlign(LEFT, TOP);
   textSize(11);
-  text("REFLECTION / 想法", r.x + pad, r.y + pad);
+  text("REFLECTION / 想法", r.x + pad, layout.labelY, r.w - pad * 2);
 
   textSize(isMobileScreen() ? 15 : 16);
   textStyle(BOLD);
-  text("What were you thinking about while drawing this apple?", r.x + pad, r.y + pad + 34, r.w - pad * 2);
+  text("What were you thinking about while drawing this apple?", r.x + pad, layout.questionY, r.w - pad * 2);
   textStyle(NORMAL);
   textSize(isMobileScreen() ? 13 : 14);
-  text("画这个苹果时，你想到了什么？", r.x + pad, r.y + pad + 58, r.w - pad * 2);
+  text("画这个苹果时，你想到了什么？", r.x + pad, layout.questionY + 24, r.w - pad * 2);
 
   fill(mutedCol);
   textSize(12);
-  text("Images, memories, feelings, or concerns.", r.x + pad, r.y + pad + 86, r.w - pad * 2);
-  text("可以写下你想到的图像、记忆、感受或担忧。", r.x + pad, r.y + pad + 104, r.w - pad * 2);
+  text("Images, memories, feelings, or concerns.", r.x + pad, layout.supportY, r.w - pad * 2);
+  text("可以写下你想到的图像、记忆、感受或担忧。", r.x + pad, layout.supportY + 18, r.w - pad * 2);
 
   if (reflectionError) {
     fill(146, 48, 36);
     textSize(11);
-    text(reflectionError, r.x + pad, r.y + r.h - pad - 60, r.w - pad * 2);
+    text(reflectionError, r.x + pad, layout.errorY, r.w - pad * 2);
   }
 }
 
@@ -940,7 +1010,8 @@ function drawPaperBackground() {
 }
 
 function getDrawSidebarWidth() {
-  return constrain(width * 0.135, 190, 220);
+  if (isMobileScreen()) return 0;
+  return constrain(width * (isCompactDesktop() ? 0.18 : 0.135), isCompactDesktop() ? 176 : 198, isCompactDesktop() ? 210 : 232);
 }
 
 function getBackgroundThumbSize() {
@@ -1098,6 +1169,8 @@ function drawDrawPageSidebar() {
   if (isMobileScreen()) return;
 
   let w = getDrawSidebarWidth();
+  let pad = isCompactDesktop() ? 22 : 30;
+  let innerW = max(1, w - pad * 2);
 
   noStroke();
   fill(251, 250, 246, 232);
@@ -1105,53 +1178,54 @@ function drawDrawPageSidebar() {
 
   fill("#2470ff");
   textAlign(LEFT);
-  textSize(14);
+  textSize(isCompactDesktop() ? 12 : 14);
   drawingContext.letterSpacing = "2px";
-  text("BEFORE I IMAGINE", 30, 42);
+  text("BEFORE I IMAGINE", pad, 42, innerW);
   drawingContext.letterSpacing = "0px";
 
   fill(mutedCol);
-  textSize(10);
-  text("A sensory drawing experiment", 30, 66);
+  textSize(isCompactDesktop() ? 9.5 : 10);
+  text("A sensory drawing experiment", pad, 66, innerW);
 
   fill(inkCol);
   textSize(11);
-  text("•  ARCHIVE", 30, 132);
-  textSize(28);
-  text(String(archive.length), 30, 176);
+  text("•  ARCHIVE", pad, 132, innerW);
+  textSize(isCompactDesktop() ? 24 : 28);
+  text(String(archive.length), pad, 176, innerW);
   fill(mutedCol);
   textSize(11);
-  text("Apples collected", 30, 198);
+  text("Apples collected", pad, 198, innerW);
 
-  drawSidebarSparkline(30, 236, w - 60, 24);
+  drawSidebarSparkline(pad, 236, innerW, 24);
 
   fill(mutedCol);
   textSize(11);
-  text("RECENT APPLES", 30, 302);
-  drawSidebarRecentApples(30, 330, w - 60);
+  text("RECENT APPLES", pad, 302, innerW);
+  drawSidebarRecentApples(pad, 330, innerW);
 
   stroke(226, 220, 210);
   strokeWeight(1);
   let aboutY = max(460, min(height - 226, 520));
-  line(30, aboutY - 28, w - 30, aboutY - 28);
+  line(pad, aboutY - 28, w - pad, aboutY - 28);
 
   noStroke();
   fill(inkCol);
   textSize(11);
-  text("ABOUT", 30, aboutY);
+  text("ABOUT", pad, aboutY, innerW);
   fill(70);
   textSize(11);
   textLeading(19);
-  text("Draw from memory.\nNot from images.\nNot from search.\nJust what comes first.", 30, aboutY + 44);
+  text("Draw from memory.\nNot from images.\nNot from search.\nJust what comes first.", pad, aboutY + 44, innerW);
 
   if (height > 690) {
     noFill();
     stroke(210, 204, 194);
-    rect(30, height - 88, w - 60, 44, 2);
+    rect(pad, height - 88, innerW, 44, 2);
     noStroke();
     fill(74);
-    textSize(10);
-    text("ABOUT THE PROJECT  ›", 44, height - 61);
+    textSize(isCompactDesktop() ? 9 : 10);
+    textAlign(CENTER, CENTER);
+    text("ABOUT THE PROJECT  ›", pad + innerW / 2, height - 66, innerW - 18, 28);
   }
 }
 
@@ -1203,7 +1277,7 @@ function drawSidebarRecentApples(x, y, w) {
     fill(146);
     textAlign(LEFT);
     textSize(10);
-    text(recent[i] ? formatRelativeArchiveTime(recent[i], i) : "waiting", x + 32, rowY + 4);
+    text(recent[i] ? formatRelativeArchiveTime(recent[i], i) : "waiting", x + 32, rowY + 4, max(1, w - 32));
   }
 }
 
@@ -1221,6 +1295,7 @@ function generateDrawBackgroundApplesLayout() {
   drawBackgroundApplesLayout = [];
   if (archive.length === 0) return;
 
+  drawLayout = getDrawingLayout();
   let mobile = isMobileScreen();
   let sidebarW = mobile ? 0 : getDrawSidebarWidth();
   let count = mobile ? min(archive.length, 24) : archive.length;
@@ -1239,6 +1314,7 @@ function generateDrawBackgroundApplesLayout() {
   let archiveRowGap = getArchiveRowGap();
   let archiveStepX = mobile ? 58 : 74;
   let rowSeen = [0, 0, 0, 0];
+  let protectedZones = getDrawBackgroundProtectedZones();
 
   if (backgroundViewMode === "slice") {
     cardW = mobile ? 88 : 128;
@@ -1258,6 +1334,10 @@ function generateDrawBackgroundApplesLayout() {
     }
 
     let scatterY = random(top, bottom);
+    for (let attempt = 0; attempt < 16 && pointInProtectedBackgroundZone(x, scatterY, protectedZones); attempt++) {
+      x = random(left, right);
+      scatterY = random(top, bottom);
+    }
     let scatterRotation = random(-0.18, 0.18);
     let d = recent[i];
     let rowIndex = getDrawingPromptIndex(d);
@@ -1290,6 +1370,37 @@ function generateDrawBackgroundApplesLayout() {
       alpha: random(0.5, 0.82)
     });
   }
+}
+
+function getDrawBackgroundProtectedZones() {
+  if (isMobileScreen()) return [];
+  let zones = [];
+  zones.push({ x: 0, y: 0, w: getDrawSidebarWidth() + 26, h: height });
+  let nav = getBackgroundViewSwitcherRect();
+  zones.push({ x: nav.x - 28, y: nav.y - 24, w: nav.w + 56, h: nav.h + 48 });
+  if (modalOpen && drawLayout && drawLayout.modalW) {
+    zones.push({
+      x: drawLayout.modalX - 36,
+      y: drawLayout.modalY - 32,
+      w: drawLayout.modalW + 72,
+      h: drawLayout.modalH + 64
+    });
+  }
+  return zones;
+}
+
+function pointInProtectedBackgroundZone(x, y, zones) {
+  for (let zone of zones) {
+    if (
+      x >= zone.x &&
+      x <= zone.x + zone.w &&
+      y >= zone.y &&
+      y <= zone.y + zone.h
+    ) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function drawFloatingArchiveApples() {
@@ -2594,10 +2705,11 @@ function drawPromptCard(p) {
     fill(mutedCol);
     textAlign(CENTER);
     textSize(13);
-    let iconColW = min(210, w * 0.26);
+    let iconColW = constrain(w * 0.24, 132, 210);
     let dividerX = x + iconColW;
     let textX = dividerX + 34;
-    let textW = w - iconColW - 190;
+    let progressW = 150;
+    let textW = max(180, w - iconColW - progressW - 54);
 
     text(p.task, x + iconColW / 2, y + 36);
 
@@ -2695,6 +2807,11 @@ function drawToolbarPanel() {
   let y = drawLayout.toolbarY;
   let w = drawLayout.toolbarW;
   let h = drawLayout.toolbarH;
+  let compact = isCompactDesktop();
+  let wrapToolbar = shouldWrapDesktopToolbar();
+  let labelPad = isMobileScreen() ? 6 : 18;
+  let pickerW = isMobileScreen() ? 48 : (compact ? 50 : 58);
+  let sliderLabelX = isMobileScreen() ? 70 : pickerW + 52;
 
   noStroke();
   fill(238, 234, 226, 210);
@@ -2702,14 +2819,19 @@ function drawToolbarPanel() {
 
   fill(inkCol);
   textAlign(LEFT);
-  textSize(12);
-  text("Colour", x + (isMobileScreen() ? 6 : 18), y + (isMobileScreen() ? 14 : 24));
-  text("Thickness", x + (isMobileScreen() ? 70 : 96), y + (isMobileScreen() ? 14 : 24));
+  textSize(isCompactDesktop() ? 10.5 : 12);
+  text("Colour", x + labelPad, y + (isMobileScreen() ? 14 : 24), max(1, pickerW + 8));
+  text("Thickness", x + sliderLabelX, y + (isMobileScreen() ? 14 : 24), max(1, w * 0.2));
 
   if (!isMobileScreen()) {
     stroke(lineCol);
     strokeWeight(1);
-    line(x + 480, y + 20, x + 480, y + h - 20);
+    if (wrapToolbar) {
+      line(x + 18, y + 72, x + w - 18, y + 72);
+    } else {
+      let dividerX = min(x + w - 190, x + w * (compact ? 0.72 : 0.68));
+      line(dividerX, y + 20, dividerX, y + h - 20);
+    }
   }
 }
 
@@ -2756,6 +2878,10 @@ function mouseClicked() {
 }
 
 function touchStarted() {
+  if (reflectionModalOpen) {
+    return true;
+  }
+
   if (touches.length > 0) {
     let x = touches[0].x;
     let y = touches[0].y;
@@ -2797,6 +2923,10 @@ function touchStarted() {
 }
 
 function touchMoved() {
+  if (reflectionModalOpen) {
+    return true;
+  }
+
   if (touches.length > 0) {
     let x = touches[0].x;
     let y = touches[0].y;
@@ -2815,6 +2945,10 @@ function touchMoved() {
 }
 
 function touchEnded() {
+  if (reflectionModalOpen) {
+    return true;
+  }
+
   handlePointerReleased();
   return true;
 }
@@ -3823,6 +3957,14 @@ async function handleReflectionChoice(shouldSaveText) {
   } finally {
     reflectionUpdating = false;
   }
+}
+
+function handleReflectionTouchChoice(event, shouldSaveText) {
+  if (event) {
+    event.preventDefault();
+    event.stopPropagation();
+  }
+  handleReflectionChoice(shouldSaveText);
 }
 
 async function updateDrawingReflection(drawing, reflectionText) {
