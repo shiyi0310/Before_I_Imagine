@@ -1217,16 +1217,6 @@ function drawDrawPageSidebar() {
   textLeading(19);
   text("Draw from memory.\nNot from images.\nNot from search.\nJust what comes first.", pad, aboutY + 44, innerW);
 
-  if (height > 690) {
-    noFill();
-    stroke(210, 204, 194);
-    rect(pad, height - 88, innerW, 44, 2);
-    noStroke();
-    fill(74);
-    textSize(isCompactDesktop() ? 9 : 10);
-    textAlign(CENTER, CENTER);
-    text("ABOUT THE PROJECT  ›", pad + innerW / 2, height - 66, innerW - 18, 28);
-  }
 }
 
 function drawSidebarSparkline(x, y, w, h) {
