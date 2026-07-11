@@ -143,6 +143,10 @@ let archiveRowLastMoveTime = 0;
 let archiveRowPressPoint = { x: 0, y: 0 };
 let archiveRowDragDistance = 0;
 let archiveRowVelocity = [0, 0, 0, 0];
+let archiveReplayState = null;
+let archiveReplayKey = "";
+let archiveReplayPausedUntil = 0;
+let archiveReplayLoading = {};
 let archiveScrollModeActive = false;
 let layerReplayIndex = 0;
 let maxLayerUnits = 0;
@@ -986,15 +990,15 @@ function drawReflectionModal() {
 
   textSize(isMobileScreen() ? 15 : 16);
   textStyle(BOLD);
-  text("Did anything come to mind while drawing this apple?", r.x + pad, layout.questionY, r.w - pad * 2);
+  text("What were you thinking about while drawing this apple?", r.x + pad, layout.questionY, r.w - pad * 2);
   textStyle(NORMAL);
   textSize(isMobileScreen() ? 13 : 14);
-  text("画这个苹果时，你想到了什么吗？", r.x + pad, layout.questionY + 24, r.w - pad * 2);
+  text("画这个苹果时，你想到了什么？", r.x + pad, layout.questionY + 24, r.w - pad * 2);
 
   fill(mutedCol);
   textSize(12);
-  text("A memory, image, feeling, detail or nothing in particular.", r.x + pad, layout.supportY, r.w - pad * 2);
-  text("记忆、画面、感觉、细节，或者“没有特别想到什么”。", r.x + pad, layout.supportY + 18, r.w - pad * 2);
+  text("Images, memories, feelings, or concerns.", r.x + pad, layout.supportY, r.w - pad * 2);
+  text("可以写下你想到的图像、记忆、感受或担忧。", r.x + pad, layout.supportY + 18, r.w - pad * 2);
 
   if (reflectionError) {
     fill(146, 48, 36);
@@ -1288,7 +1292,7 @@ function generateDrawBackgroundApplesLayout() {
   drawLayout = getDrawingLayout();
   let mobile = isMobileScreen();
   let sidebarW = mobile ? 0 : getDrawSidebarWidth();
-  let count = mobile ? min(archive.length, 24) : archive.length;
+  let count = backgroundViewMode === "archive" ? archive.length : (mobile ? min(archive.length, 24) : archive.length);
   let recent = archive.slice(-count);
   let archiveStartIndex = archive.length - recent.length;
   let left = sidebarW + (mobile ? 18 : 34);
@@ -1297,12 +1301,13 @@ function generateDrawBackgroundApplesLayout() {
   let bottom = height - (mobile ? 190 : 40);
   let cardW = mobile ? 62 : 86;
   let cardH = mobile ? 62 : 86;
-  let archiveCardW = mobile ? 88 : 122;
-  let archiveCardH = mobile ? 124 : 166;
-  let archiveStartX = sidebarW + (mobile ? 56 : 190);
+  let filmMetrics = getArchiveFilmMetrics();
+  let archiveCardW = filmMetrics.cardW;
+  let archiveCardH = filmMetrics.cardH;
+  let archiveStartX = filmMetrics.startX;
   let archiveTop = getArchiveRowsTop();
   let archiveRowGap = getArchiveRowGap();
-  let archiveStepX = mobile ? 58 : 74;
+  let archiveStepX = filmMetrics.stepX;
   let rowSeen = [0, 0, 0, 0];
   let protectedZones = getDrawBackgroundProtectedZones();
 
@@ -1333,7 +1338,7 @@ function generateDrawBackgroundApplesLayout() {
     let rowIndex = getDrawingPromptIndex(d);
     if (rowIndex === null || rowIndex < 0 || rowIndex > 3) rowIndex = 0;
     let rowCol = rowSeen[rowIndex]++;
-    let archiveRotation = radians(((rowCol % 5) - 2) * 1.8);
+    let archiveRotation = 0;
 
     drawBackgroundApplesLayout.push({
       archiveIndex: archiveStartIndex + i,
@@ -1343,7 +1348,7 @@ function generateDrawBackgroundApplesLayout() {
       scatterY: scatterY,
       scatterRotation: scatterRotation,
       archiveX: archiveStartX + rowCol * archiveStepX,
-      archiveY: archiveTop + rowIndex * archiveRowGap,
+      archiveY: archiveTop + rowIndex * archiveRowGap + archiveCardH / 2 + 34,
       archiveRotation: archiveRotation,
       archiveW: archiveCardW,
       archiveH: archiveCardH,
@@ -1405,6 +1410,10 @@ function drawFloatingArchiveApples() {
     return;
   }
 
+  if (backgroundViewMode === "archive") {
+    updateArchiveFilmReplay();
+  }
+
   for (let item of drawBackgroundApplesLayout) {
     let d = archive[item.archiveIndex];
     if (!d) continue;
@@ -1424,16 +1433,16 @@ function drawFloatingArchiveApples() {
     let rowPan = archiveRowPan[item.rowIndex] || 0;
     let archiveX = item.archiveX + rowPan;
     let archiveY = item.archiveY;
-    let drawX = lerp(scatterX, archiveX, archiveTransition);
-    let drawY = lerp(scatterY, archiveY, archiveTransition);
-    let drawRotation = lerp(item.scatterRotation, item.archiveRotation, archiveTransition);
-    let drawSize = lerp(item.size, item.archiveW, archiveTransition);
-    let cardH = lerp(item.size, item.archiveH, archiveTransition);
+    let drawX = isArchiveMode ? archiveX : lerp(scatterX, archiveX, archiveTransition);
+    let drawY = isArchiveMode ? archiveY : lerp(scatterY, archiveY, archiveTransition);
+    let drawRotation = isArchiveMode ? 0 : lerp(item.scatterRotation, item.archiveRotation, archiveTransition);
+    let drawSize = isArchiveMode ? item.archiveW : lerp(item.size, item.archiveW, archiveTransition);
+    let cardH = isArchiveMode ? item.archiveH : lerp(item.size, item.archiveH, archiveTransition);
     let hovered = isArchiveMode && archiveCardHitTest(mouseX, mouseY, item, drawX, drawY, drawSize, cardH);
-    item.lift = lerp(item.lift || 0, hovered ? -22 : 0, 0.16);
+    item.lift = 0;
 
     push();
-    translate(drawX, drawY + item.lift);
+    translate(drawX, drawY);
     rotate(drawRotation + (mobile || isArchiveMode ? 0 : sin(t * 1.4) * 0.025));
 
     if (isArchiveMode) {
@@ -2145,37 +2154,47 @@ function drawFloatingSliceCard(d, item) {
 
 function drawArchiveTarotCard(d, item, cardW, cardH, hovered) {
   let isOutlier = d && d.tag === "outlier";
-  drawingContext.save();
-  drawingContext.shadowColor = hovered ? "rgba(46, 36, 24, 0.2)" : "rgba(46, 36, 24, 0.11)";
-  drawingContext.shadowBlur = hovered ? 24 : 14;
-  drawingContext.shadowOffsetY = hovered ? 16 : 10;
   noStroke();
-  fill(252, 248, 238, isOutlier ? 128 : (hovered ? 220 : 186));
-  rect(-cardW / 2, -cardH / 2, cardW, cardH, 7);
-  drawingContext.restore();
+  fill(252, 248, 238, isOutlier ? 104 : (hovered ? 205 : 168));
+  rect(-cardW / 2, -cardH / 2, cardW, cardH, 4);
 
-  stroke(226, 216, 202, hovered ? 220 : 150);
-  strokeWeight(1);
+  stroke(226, 216, 202, hovered ? 170 : 105);
+  strokeWeight(0.8);
   noFill();
-  rect(-cardW / 2 + 0.5, -cardH / 2 + 0.5, cardW - 1, cardH - 1, 7);
+  rect(-cardW / 2 + 0.5, -cardH / 2 + 0.5, cardW - 1, cardH - 1, 4);
 
-  let imageSize = cardW * 0.76;
+  let imageW = cardW - 18;
+  let imageH = cardH - 42;
   push();
-  translate(-imageSize / 2, -imageSize / 2 - cardH * 0.04);
-  if (item.cachedThumb) {
-    tint(255, isOutlier ? 112 : (hovered ? 245 : 210));
-    drawImageContained(item.cachedThumb, 0, 0, imageSize, imageSize);
+  translate(-imageW / 2, -cardH / 2 + 10);
+  let replaying = isArchiveFilmItemReplaying(item);
+  if (replaying && drawingHasReplayData(d)) {
+    let limit = getArchiveFilmReplayLimit(d, item);
+    drawReplayMini(d, limit, imageW, imageH, isOutlier ? 0.38 : 0.9);
+  } else if (item.cachedThumb) {
+    tint(255, isOutlier ? 95 : (hovered ? 235 : 205));
+    drawImageContained(item.cachedThumb, 0, 0, imageW, imageH);
     noTint();
   } else {
-    drawMissingImagePlaceholder(imageSize, imageSize);
+    drawMissingImagePlaceholder(imageW, imageH);
   }
   pop();
 
   noStroke();
-  fill(80, 73, 66, hovered ? 170 : 122);
+  fill(80, 73, 66, hovered ? 156 : 112);
   textAlign(RIGHT);
-  textSize(8.5);
-  text(`#${item.archiveIndex + 1}`, cardW / 2 - 8, cardH / 2 - 20);
+  textSize(8);
+  text(`#${item.archiveIndex + 1}`, cardW / 2 - 8, cardH / 2 - 24);
+  if (d && d.durationSeconds !== undefined) {
+    textSize(7.2);
+    text(`${Number(d.durationSeconds).toFixed(1)}s`, cardW / 2 - 8, cardH / 2 - 13);
+  }
+  if (d && d.reflection_text) {
+    textAlign(LEFT);
+    fill(84, 76, 68, 105);
+    textSize(6.8);
+    text(shortenText(d.reflection_text, 18), -cardW / 2 + 8, cardH / 2 - 25, cardW - 18);
+  }
 
   drawArchiveOutlierButton(d, cardW, cardH, false);
 }
@@ -2214,7 +2233,7 @@ function drawArchiveOutlierButton(d, cardW, cardH, mobile) {
 
 function archiveCardHitTest(px, py, item, cx, cy, cardW, cardH) {
   let dx = px - cx;
-  let dy = py - (cy + (item.lift || 0));
+  let dy = py - cy;
   return abs(dx) <= cardW / 2 && abs(dy) <= cardH / 2;
 }
 
@@ -2224,10 +2243,10 @@ function getArchiveModeCardAt(px, py) {
   for (let i = drawBackgroundApplesLayout.length - 1; i >= 0; i--) {
     let item = drawBackgroundApplesLayout[i];
     let rowPan = archiveRowPan[item.rowIndex] || 0;
-    let x = lerp(item.scatterX, item.archiveX + rowPan, archiveTransition);
-    let y = lerp(item.scatterY, item.archiveY, archiveTransition);
-    let w = lerp(item.size, item.archiveW, archiveTransition);
-    let h = lerp(item.size, item.archiveH, archiveTransition);
+    let x = item.archiveX + rowPan;
+    let y = item.archiveY;
+    let w = item.archiveW;
+    let h = item.archiveH;
     if (archiveCardHitTest(px, py, item, x, y, w, h)) {
       return item.archiveIndex;
     }
@@ -2258,13 +2277,12 @@ function getDesktopArchiveOutlierButtonAt(px, py) {
   for (let i = drawBackgroundApplesLayout.length - 1; i >= 0; i--) {
     let item = drawBackgroundApplesLayout[i];
     let rowPan = archiveRowPan[item.rowIndex] || 0;
-    let x = lerp(item.scatterX, item.archiveX + rowPan, archiveTransition);
-    let y = lerp(item.scatterY, item.archiveY, archiveTransition) + (item.lift || 0);
-    let w = lerp(item.size, item.archiveW, archiveTransition);
-    let h = lerp(item.size, item.archiveH, archiveTransition);
-    let rotation = lerp(item.scatterRotation, item.archiveRotation, archiveTransition);
+    let x = item.archiveX + rowPan;
+    let y = item.archiveY;
+    let w = item.archiveW;
+    let h = item.archiveH;
     let button = getArchiveOutlierButtonRect(w, h, false);
-    if (pointInsideRotatedCardRect(px, py, x, y, rotation, button)) return item.archiveIndex;
+    if (pointInsideRotatedCardRect(px, py, x, y, 0, button)) return item.archiveIndex;
   }
 
   return -1;
@@ -2280,12 +2298,152 @@ function getArchiveRowLabel(rowIndex) {
   return labels[rowIndex] || labels[0];
 }
 
+function getArchiveFilmMetrics() {
+  let mobile = isMobileScreen();
+  let sidebarW = mobile ? 0 : getDrawSidebarWidth();
+  let cardW = mobile ? 96 : 112;
+  let cardH = mobile ? 128 : 96;
+  let gap = mobile ? 10 : 12;
+  return {
+    cardW: cardW,
+    cardH: cardH,
+    gap: gap,
+    stepX: cardW + gap,
+    startX: sidebarW + (mobile ? 78 : 206)
+  };
+}
+
+function getArchiveReplayKey() {
+  return `${archive.length}:${archive.map(d => d && (d.dbId || d.id || d.createdAt || "")).join("|")}`;
+}
+
+function resetArchiveFilmReplay() {
+  archiveReplayKey = getArchiveReplayKey();
+  archiveReplayLoading = {};
+  archiveReplayState = {
+    active: [-1, -1, -1, -1],
+    cursor: [0, 0, 0, 0],
+    startedAt: [0, 0, 0, 0],
+    nextStartAt: [0, 0, 0, 0],
+    completed: {}
+  };
+}
+
+function ensureArchiveFilmReplayState() {
+  let key = getArchiveReplayKey();
+  if (!archiveReplayState || archiveReplayKey !== key) {
+    resetArchiveFilmReplay();
+  }
+}
+
+function getArchiveFilmRowItems(rowIndex) {
+  return drawBackgroundApplesLayout
+    .filter(item => item.rowIndex === rowIndex)
+    .sort((a, b) => a.archiveX - b.archiveX);
+}
+
+function archiveFilmItemVisible(item) {
+  if (!item) return false;
+  let rowPan = archiveRowPan[item.rowIndex] || 0;
+  let x = item.archiveX + rowPan;
+  let halfW = item.archiveW / 2;
+  return x + halfW >= getDrawSidebarWidth() && x - halfW <= width;
+}
+
+function drawingHasReplayData(d) {
+  return Boolean(d && Array.isArray(d.actions) && d.actions.length > 0);
+}
+
+function updateArchiveFilmReplay() {
+  ensureArchiveFilmReplayState();
+  if (!archiveReplayState || archiveRowDragging || millis() < archiveReplayPausedUntil) return;
+
+  for (let row = 0; row < 4; row++) {
+    let rowItems = getArchiveFilmRowItems(row);
+    let activeArchiveIndex = archiveReplayState.active[row];
+    let activeItem = rowItems.find(item => item.archiveIndex === activeArchiveIndex);
+
+    if (activeItem) {
+      if (!archiveFilmItemVisible(activeItem)) continue;
+      let d = archive[activeItem.archiveIndex];
+      if (!drawingHasReplayData(d)) {
+        ensureArchiveFilmReplayData(activeItem.archiveIndex);
+        archiveReplayState.startedAt[row] = millis();
+        continue;
+      }
+      if (millis() - archiveReplayState.startedAt[row] >= getArchiveFilmReplayDuration(d)) {
+        archiveReplayState.completed[activeItem.archiveIndex] = true;
+        archiveReplayState.active[row] = -1;
+        archiveReplayState.cursor[row] += 1;
+        archiveReplayState.nextStartAt[row] = millis() + 110;
+      }
+      continue;
+    }
+
+    if (millis() < archiveReplayState.nextStartAt[row]) continue;
+
+    while (archiveReplayState.cursor[row] < rowItems.length) {
+      let item = rowItems[archiveReplayState.cursor[row]];
+      if (archiveReplayState.completed[item.archiveIndex]) {
+        archiveReplayState.cursor[row] += 1;
+        continue;
+      }
+      if (!archiveFilmItemVisible(item)) break;
+      archiveReplayState.active[row] = item.archiveIndex;
+      archiveReplayState.startedAt[row] = millis();
+      break;
+    }
+  }
+}
+
+function ensureArchiveFilmReplayData(archiveIndex) {
+  let d = archive[archiveIndex];
+  if (!d || drawingHasReplayData(d) || archiveReplayLoading[archiveIndex]) return;
+  archiveReplayLoading[archiveIndex] = true;
+  fetchDrawingDetails(archiveIndex).finally(() => {
+    archiveReplayLoading[archiveIndex] = false;
+  });
+}
+
+function isArchiveFilmItemReplaying(item) {
+  return Boolean(
+    backgroundViewMode === "archive" &&
+    archiveReplayState &&
+    archiveReplayState.active[item.rowIndex] === item.archiveIndex &&
+    archiveFilmItemVisible(item)
+  );
+}
+
+function isArchiveIndexReplaying(archiveIndex) {
+  if (!archiveReplayState) return false;
+  let item = drawBackgroundApplesLayout.find(layoutItem => layoutItem.archiveIndex === archiveIndex);
+  return item ? isArchiveFilmItemReplaying(item) : false;
+}
+
+function getArchiveFilmReplayLimitForIndex(d, archiveIndex) {
+  let item = drawBackgroundApplesLayout.find(layoutItem => layoutItem.archiveIndex === archiveIndex);
+  return item ? getArchiveFilmReplayLimit(d, item) : 999999;
+}
+
+function getArchiveFilmReplayDuration(d) {
+  let units = countDrawingUnits(d);
+  return constrain(map(units, 20, 900, 800, 1500), 800, 1500);
+}
+
+function getArchiveFilmReplayLimit(d, item) {
+  if (!archiveReplayState) return 999999;
+  let duration = getArchiveFilmReplayDuration(d);
+  let elapsed = millis() - (archiveReplayState.startedAt[item.rowIndex] || 0);
+  let progress = constrain(elapsed / duration, 0, 1);
+  return max(1, countDrawingUnits(d) * progress);
+}
+
 function getArchiveRowsTop() {
-  return isMobileScreen() ? 126 : 216;
+  return isMobileScreen() ? 126 : 206;
 }
 
 function getArchiveRowGap() {
-  return isMobileScreen() ? 118 : 132;
+  return isMobileScreen() ? 158 : 132;
 }
 
 function drawMemoryArchiveView() {
@@ -2329,15 +2487,19 @@ function drawMemoryArchiveView() {
   fill(108);
   textAlign(CENTER);
   textSize(12);
-  text("Drag each row to browse the tarot spread", sidebarW + (width - sidebarW) / 2, height - 56);
+  text("Drag each row to browse the film archive", sidebarW + (width - sidebarW) / 2, height - 56);
 }
 
 function drawMobileArchiveView() {
+  if (drawBackgroundApplesLayout.length === 0) generateDrawBackgroundApplesLayout();
+  updateArchiveFilmReplay();
+
   let pad = 22;
   let y = 86 - getMobileArchiveScrollY();
-  let cardW = min(width * 0.62, 240);
-  let cardH = 150;
-  let stepX = cardW * 0.72;
+  let metrics = getArchiveFilmMetrics();
+  let cardW = metrics.cardW;
+  let cardH = metrics.cardH;
+  let stepX = metrics.stepX;
 
   noStroke();
   fill(48);
@@ -2381,11 +2543,10 @@ function drawMobileArchiveView() {
     let rowPan = archiveRowPan[groupIndex] || 0;
     for (let i = 0; i < group.length; i++) {
       let item = group[i];
-      let cardX = pad + 8 + rowPan + i * stepX;
+      let cardX = metrics.startX - cardW / 2 + rowPan + i * stepX;
       let cardY = y;
-      let rotation = radians(((i % 5) - 2) * 1.2);
 
-      drawMobileArchiveCard(item.drawing, item.index, cardX, cardY, cardW, cardH, rotation);
+      drawMobileArchiveCard(item.drawing, item.index, cardX, cardY, cardW, cardH, 0);
     }
 
     y += cardH + 58;
@@ -2396,27 +2557,27 @@ function drawMobileArchiveCard(d, archiveIndex, x, y, w, h, rotation) {
   let isOutlier = d && d.tag === "outlier";
   push();
   translate(x + w / 2, y + h / 2);
-  rotate(rotation);
 
-  drawingContext.save();
-  drawingContext.shadowColor = "rgba(46, 36, 24, 0.12)";
-  drawingContext.shadowBlur = 15;
-  drawingContext.shadowOffsetY = 8;
   noStroke();
-  fill(252, 248, 238, isOutlier ? 132 : 188);
-  rect(-w / 2, -h / 2, w, h, 8);
-  drawingContext.restore();
+  fill(252, 248, 238, isOutlier ? 112 : 174);
+  rect(-w / 2, -h / 2, w, h, 4);
 
-  stroke(226, 216, 202, 150);
-  strokeWeight(1);
+  stroke(226, 216, 202, 112);
+  strokeWeight(0.8);
   noFill();
-  rect(-w / 2 + 0.5, -h / 2 + 0.5, w - 1, h - 1, 8);
+  rect(-w / 2 + 0.5, -h / 2 + 0.5, w - 1, h - 1, 4);
 
   push();
-  translate(-w * 0.32, -h * 0.34);
-  if (isOutlier) tint(255, 120);
-  drawStaticMini(d, w * 0.64, h * 0.68);
-  if (isOutlier) noTint();
+  translate(-w * 0.39, -h * 0.42);
+  let imageW = w * 0.78;
+  let imageH = h * 0.64;
+  if (isArchiveIndexReplaying(archiveIndex) && drawingHasReplayData(d)) {
+    drawReplayMini(d, getArchiveFilmReplayLimitForIndex(d, archiveIndex), imageW, imageH, isOutlier ? 0.38 : 0.9);
+  } else {
+    if (isOutlier) tint(255, 120);
+    drawStaticMini(d, imageW, imageH);
+    if (isOutlier) noTint();
+  }
   pop();
 
   noStroke();
@@ -2431,11 +2592,11 @@ function drawMobileArchiveCard(d, archiveIndex, x, y, w, h, rotation) {
 }
 
 function getMobileArchiveCardAt(px, py) {
-  let pad = 22;
   let y = 86 - getMobileArchiveScrollY() + 62;
-  let cardW = min(width * 0.62, 240);
-  let cardH = 150;
-  let stepX = cardW * 0.72;
+  let metrics = getArchiveFilmMetrics();
+  let cardW = metrics.cardW;
+  let cardH = metrics.cardH;
+  let stepX = metrics.stepX;
 
   for (let groupIndex = 0; groupIndex < 4; groupIndex++) {
     let group = archive
@@ -2451,7 +2612,7 @@ function getMobileArchiveCardAt(px, py) {
 
     let rowPan = archiveRowPan[groupIndex] || 0;
     for (let i = 0; i < group.length; i++) {
-      let cardX = pad + 8 + rowPan + i * stepX;
+      let cardX = metrics.startX - cardW / 2 + rowPan + i * stepX;
       let cardY = y;
 
       if (px >= cardX && px <= cardX + cardW && py >= cardY && py <= cardY + cardH) {
@@ -2466,11 +2627,11 @@ function getMobileArchiveCardAt(px, py) {
 }
 
 function getMobileArchiveOutlierButtonAt(px, py) {
-  let pad = 22;
   let y = 86 - getMobileArchiveScrollY() + 62;
-  let cardW = min(width * 0.62, 240);
-  let cardH = 150;
-  let stepX = cardW * 0.72;
+  let metrics = getArchiveFilmMetrics();
+  let cardW = metrics.cardW;
+  let cardH = metrics.cardH;
+  let stepX = metrics.stepX;
 
   for (let groupIndex = 0; groupIndex < 4; groupIndex++) {
     let group = archive
@@ -2484,11 +2645,10 @@ function getMobileArchiveOutlierButtonAt(px, py) {
 
     let rowPan = archiveRowPan[groupIndex] || 0;
     for (let i = group.length - 1; i >= 0; i--) {
-      let cardX = pad + 8 + rowPan + i * stepX;
+      let cardX = metrics.startX - cardW / 2 + rowPan + i * stepX;
       let cardY = y;
-      let rotation = radians(((i % 5) - 2) * 1.2);
       let button = getArchiveOutlierButtonRect(cardW, cardH, true);
-      if (pointInsideRotatedCardRect(px, py, cardX + cardW / 2, cardY + cardH / 2, rotation, button)) {
+      if (pointInsideRotatedCardRect(px, py, cardX + cardW / 2, cardY + cardH / 2, 0, button)) {
         return group[i].index;
       }
     }
@@ -2500,10 +2660,11 @@ function getMobileArchiveOutlierButtonAt(px, py) {
 
 function getMobileArchiveContentHeight() {
   let y = 86 + 62;
+  let metrics = getArchiveFilmMetrics();
   for (let groupIndex = 0; groupIndex < 4; groupIndex++) {
     let count = archive.filter(d => getArchivePromptGroupIndex(d) === groupIndex).length;
     y += 24;
-    y += count > 0 ? 208 : 48;
+    y += count > 0 ? metrics.cardH + 58 : 48;
   }
   return y + 48;
 }
@@ -3028,6 +3189,7 @@ function handlePointerDragged(x, y) {
   }
 
   if (archiveRowDragging) {
+    archiveReplayPausedUntil = millis() + 500;
     let dx = x - archiveRowLastX;
     let now = millis();
     let dt = max(16, now - archiveRowLastMoveTime);
@@ -3233,6 +3395,8 @@ function handleDrawPageClick(x, y) {
       currentAction = null;
       if (switchMode === "archive") {
         archivePan.y = 0;
+        generateDrawBackgroundApplesLayout();
+        resetArchiveFilmReplay();
       }
       if (switchMode === "wall" || switchMode === "slice") {
         generateDrawBackgroundApplesLayout();
@@ -3349,7 +3513,7 @@ function getArchiveRowAt(x, y) {
 
   if (isMobileScreen()) {
     let rowY = 86 - getMobileArchiveScrollY() + 62;
-    let cardH = 150;
+    let cardH = getArchiveFilmMetrics().cardH;
     for (let i = 0; i < 4; i++) {
       rowY += 24;
       let count = archive.filter(d => getArchivePromptGroupIndex(d) === i).length;
@@ -3361,9 +3525,11 @@ function getArchiveRowAt(x, y) {
 
   let top = getArchiveRowsTop();
   let gap = getArchiveRowGap();
+  let metrics = getArchiveFilmMetrics();
   for (let i = 0; i < 4; i++) {
     let rowY = top + i * gap;
-    if (y >= rowY - 64 && y <= rowY + 72) return i;
+    let cardTop = rowY + 34;
+    if (y >= cardTop - 10 && y <= cardTop + metrics.cardH + 10) return i;
   }
   return -1;
 }
@@ -3376,16 +3542,16 @@ function constrainArchiveRowPan(rowIndex) {
 function getArchiveRowPanBounds(rowIndex) {
   if (isMobileScreen()) {
     let count = archive.filter(d => getArchivePromptGroupIndex(d) === rowIndex).length;
-    let cardW = min(width * 0.62, 240);
-    let stepX = cardW * 0.72;
-    let contentW = count > 0 ? (count - 1) * stepX + cardW + 60 : width;
-    let minX = min(0, width - contentW - 30);
+    let metrics = getArchiveFilmMetrics();
+    let contentW = count > 0 ? (count - 1) * metrics.stepX + metrics.cardW + metrics.startX : width;
+    let minX = min(0, width - contentW - 28);
     return { min: minX, max: 0 };
   }
 
   let frame = getArchiveCardsSafeFrame();
   let rowCount = drawBackgroundApplesLayout.filter(item => item.rowIndex === rowIndex).length;
-  let rowW = rowCount * 74 + 150;
+  let metrics = getArchiveFilmMetrics();
+  let rowW = rowCount > 0 ? (rowCount - 1) * metrics.stepX + metrics.cardW + 24 : frame.w;
   let minX = -max(0, rowW - frame.w);
   return { min: minX, max: 0 };
 }
@@ -3436,6 +3602,7 @@ function updateArchiveRowInertia() {
 
     applyArchiveRowPanDelta(i, v, false);
     archiveRowVelocity[i] *= 0.92;
+    archiveReplayPausedUntil = millis() + 100;
   }
 }
 
@@ -3551,6 +3718,7 @@ function mouseWheel(event) {
       let delta = abs(event.deltaX || 0) > abs(event.deltaY || 0) ? event.deltaX : event.delta;
       applyArchiveRowPanDelta(row, -delta, true);
       archiveRowVelocity[row] = -delta * 0.18;
+      archiveReplayPausedUntil = millis() + 500;
       return false;
     }
   }
@@ -4006,6 +4174,7 @@ function advancePrompt() {
   selectedApple = null;
   selectedAppleIndex = -1;
   generateDrawBackgroundApplesLayout();
+  resetArchiveFilmReplay();
 }
 
 function saveArchive() {
