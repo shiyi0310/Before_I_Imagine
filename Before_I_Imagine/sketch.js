@@ -146,6 +146,8 @@ let archiveRowVelocity = [0, 0, 0, 0];
 let archiveReplayState = null;
 let archiveReplayKey = "";
 let archiveReplayLoading = {};
+let archiveReplayMiniBuffer = null;
+let archiveReplayMiniBufferSize = { w: 0, h: 0 };
 let archiveRowAutoPanTarget = [null, null, null, null];
 let archiveRowManualPauseUntil = [0, 0, 0, 0];
 let archiveScrollModeActive = false;
@@ -1449,7 +1451,7 @@ function drawFloatingArchiveApples() {
     push();
     translate(drawX, drawY);
     rotate(drawRotation + (mobile || isArchiveMode ? 0 : sin(t * 1.4) * 0.025));
-    item.currentDrawLoop = isArchiveMode ? round(loopOffset / getArchiveFilmLoopWidth()) : 0;
+    item.currentDrawLoop = isArchiveMode ? round(loopOffset / getArchiveFilmLoopWidth(item.rowIndex)) : 0;
 
     if (isArchiveMode) {
       drawArchiveTarotCard(d, item, drawSize, cardH, hovered);
@@ -1479,11 +1481,16 @@ function drawFloatingArchiveApples() {
 }
 
 function getArchiveFilmDrawOffsets(item) {
-  let cycleW = getArchiveFilmLoopWidth();
+  let cycleW = getArchiveFilmLoopWidth(item.rowIndex);
+  if (cycleW <= 0) return [0];
   let rowPan = archiveRowPan[item.rowIndex] || 0;
-  let centerLoop = floor((-rowPan) / cycleW);
   let offsets = [];
-  for (let k = centerLoop - 1; k <= centerLoop + 1; k++) {
+  let frame = getArchiveVisibleRowFrame();
+  let left = frame.x - item.archiveX - rowPan - item.archiveW;
+  let right = frame.x + frame.w - item.archiveX - rowPan + item.archiveW;
+  let firstLoop = floor(left / cycleW) - 1;
+  let lastLoop = ceil(right / cycleW) + 1;
+  for (let k = firstLoop; k <= lastLoop; k++) {
     offsets.push(k * cycleW);
   }
   return offsets;
@@ -2369,13 +2376,17 @@ function getArchiveFilmRowItems(rowIndex) {
     .sort((a, b) => a.archiveX - b.archiveX);
 }
 
-function getArchiveFilmLoopWidth() {
+function getArchiveFilmLoopWidth(rowIndex = -1) {
   let metrics = getArchiveFilmMetrics();
+  if (rowIndex >= 0) {
+    let rowCount = max(1, getArchiveFilmRowItems(rowIndex).length);
+    return rowCount * metrics.stepX;
+  }
   let maxCount = 1;
   for (let row = 0; row < 4; row++) {
     maxCount = max(maxCount, getArchiveFilmRowItems(row).length);
   }
-  return max(width, maxCount * metrics.stepX + metrics.cardW + metrics.gap * 8);
+  return maxCount * metrics.stepX;
 }
 
 function archiveFilmItemVisible(item) {
@@ -2465,7 +2476,7 @@ function archiveFilmItemReadyToReplay(item, loop = 0) {
 function getArchiveRowPanForItem(item, loop = 0) {
   let frame = getArchiveVisibleRowFrame();
   let desiredX = frame.x + frame.w * 0.42;
-  let virtualX = item.archiveX + loop * getArchiveFilmLoopWidth();
+  let virtualX = item.archiveX + loop * getArchiveFilmLoopWidth(item.rowIndex);
   return desiredX - virtualX;
 }
 
@@ -2665,7 +2676,7 @@ function drawMobileArchiveView() {
       let cardY = y;
       for (let offset of offsets) {
         let cardX = (layoutItem ? layoutItem.archiveX : metrics.startX + i * stepX) - cardW / 2 + rowPan + offset;
-        if (layoutItem) layoutItem.currentDrawLoop = round(offset / getArchiveFilmLoopWidth());
+        if (layoutItem) layoutItem.currentDrawLoop = round(offset / getArchiveFilmLoopWidth(layoutItem.rowIndex));
         drawMobileArchiveCard(item.drawing, item.index, cardX, cardY, cardW, cardH, 0);
         if (layoutItem) layoutItem.currentDrawLoop = 0;
       }
@@ -5602,22 +5613,35 @@ function countDrawingUnits(d) {
 }
 
 function drawReplayMini(d, limit, miniW, miniH, alphaValue) {
-  let g = createGraphics(miniW, miniH);
+  miniW = max(1, floor(miniW));
+  miniH = max(1, floor(miniH));
+  if (
+    !archiveReplayMiniBuffer ||
+    archiveReplayMiniBufferSize.w !== miniW ||
+    archiveReplayMiniBufferSize.h !== miniH
+  ) {
+    if (archiveReplayMiniBuffer) {
+      try {
+        if (archiveReplayMiniBuffer.canvas && archiveReplayMiniBuffer.canvas.parentNode) {
+          archiveReplayMiniBuffer.canvas.parentNode.removeChild(archiveReplayMiniBuffer.canvas);
+        }
+      } catch (error) {
+        console.warn("Could not remove archive replay buffer:", error);
+      }
+    }
+    archiveReplayMiniBuffer = createGraphics(miniW, miniH);
+    archiveReplayMiniBuffer.pixelDensity(1);
+    archiveReplayMiniBuffer.smooth();
+    archiveReplayMiniBufferSize = { w: miniW, h: miniH };
+  }
+
+  let g = archiveReplayMiniBuffer;
   g.pixelDensity(1);
   g.clear();
-  g.smooth();
 
   renderDrawingToGraphics(g, d, limit, true, alphaValue);
 
   image(g, 0, 0);
-
-  try {
-    if (g && g.canvas && g.canvas.parentNode) {
-      g.canvas.parentNode.removeChild(g.canvas);
-    }
-  } catch (error) {
-    console.warn("Could not remove replay graphics canvas:", error);
-  }
 }
 
 function drawStaticMini(d, miniW, miniH) {
