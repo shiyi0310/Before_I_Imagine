@@ -2215,13 +2215,6 @@ function drawArchiveTarotCard(d, item, cardW, cardH, hovered) {
     textSize(7.2);
     text(`${Number(d.durationSeconds).toFixed(1)}s`, cardW / 2 - 8, cardH / 2 - 13);
   }
-  if (d && d.reflection_text) {
-    textAlign(LEFT);
-    fill(84, 76, 68, 105);
-    textSize(6.8);
-    text(shortenText(d.reflection_text, 18), -cardW / 2 + 8, cardH / 2 - 25, cardW - 18);
-  }
-
   drawArchiveOutlierButton(d, cardW, cardH, false, hovered);
 }
 
@@ -2615,11 +2608,6 @@ function drawMemoryArchiveView() {
     line(x0, rowY + i * getArchiveRowGap() + 18, width - 50, rowY + i * getArchiveRowGap() + 18);
   }
 
-  noStroke();
-  fill(108);
-  textAlign(CENTER);
-  textSize(12);
-  text("Drag each row to browse the film archive", sidebarW + (width - sidebarW) / 2, height - 56);
 }
 
 function drawMobileArchiveView() {
