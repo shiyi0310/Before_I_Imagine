@@ -2222,26 +2222,27 @@ function drawArchiveTarotCard(d, item, cardW, cardH, hovered) {
     text(shortenText(d.reflection_text, 18), -cardW / 2 + 8, cardH / 2 - 25, cardW - 18);
   }
 
-  drawArchiveOutlierButton(d, cardW, cardH, false);
+  drawArchiveOutlierButton(d, cardW, cardH, false, hovered);
 }
 
 function getArchiveOutlierButtonRect(cardW, cardH, mobile) {
-  let buttonW = mobile ? min(104, cardW * 0.48) : min(68, cardW - 14);
-  let buttonH = mobile ? 20 : 17;
+  let buttonW = mobile ? min(48, cardW * 0.5) : min(42, cardW - 16);
+  let buttonH = mobile ? 18 : 15;
   return {
-    x: -cardW / 2 + 7,
-    y: cardH / 2 - buttonH - (mobile ? 10 : 9),
+    x: -cardW / 2 + 8,
+    y: cardH / 2 - buttonH - (mobile ? 9 : 8),
     w: buttonW,
     h: buttonH
   };
 }
 
-function drawArchiveOutlierButton(d, cardW, cardH, mobile) {
+function drawArchiveOutlierButton(d, cardW, cardH, mobile, hovered = false) {
   let marked = d && d.tag === "outlier";
+  if (!marked && !hovered) return;
   let r = getArchiveOutlierButtonRect(cardW, cardH, mobile);
 
   noStroke();
-  fill(marked ? 68 : 250, marked ? 63 : 247, marked ? 58 : 240, marked ? 205 : 180);
+  fill(marked ? 68 : 250, marked ? 63 : 247, marked ? 58 : 240, marked ? 190 : 166);
   rect(r.x, r.y, r.w, r.h, r.h / 2);
   if (!marked) {
     noFill();
@@ -2253,8 +2254,8 @@ function drawArchiveOutlierButton(d, cardW, cardH, mobile) {
   noStroke();
   fill(marked ? 250 : 91, marked ? 248 : 83, marked ? 244 : 76);
   textAlign(CENTER, CENTER);
-  textSize(mobile ? 7.5 : 5.8);
-  text(marked ? "Restore" : "Mark as Outlier", r.x + r.w / 2, r.y + r.h / 2 + 0.5);
+  textSize(mobile ? 7 : 6);
+  text(marked ? "Hidden" : "Hide", r.x + r.w / 2, r.y + r.h / 2 + 0.5);
 }
 
 function archiveCardHitTest(px, py, item, cx, cy, cardW, cardH) {
@@ -2304,6 +2305,7 @@ function getDesktopArchiveOutlierButtonAt(px, py) {
 
   for (let i = drawBackgroundApplesLayout.length - 1; i >= 0; i--) {
     let item = drawBackgroundApplesLayout[i];
+    let d = archive[item.archiveIndex];
     let rowPan = archiveRowPan[item.rowIndex] || 0;
     let y = item.archiveY;
     let w = item.archiveW;
@@ -2311,6 +2313,8 @@ function getDesktopArchiveOutlierButtonAt(px, py) {
     let button = getArchiveOutlierButtonRect(w, h, false);
     for (let offset of getArchiveFilmDrawOffsets(item)) {
       let x = item.archiveX + rowPan + offset;
+      let visible = (d && d.tag === "outlier") || archiveCardHitTest(px, py, item, x, y, w, h);
+      if (!visible) continue;
       if (pointInsideRotatedCardRect(px, py, x, y, 0, button)) return item.archiveIndex;
     }
   }
@@ -2719,7 +2723,7 @@ function drawMobileArchiveCard(d, archiveIndex, x, y, w, h, rotation) {
   textSize(10);
   text(`#${archiveIndex + 1}`, w / 2 - 16, h / 2 - 18);
 
-  drawArchiveOutlierButton(d, w, h, true);
+  drawArchiveOutlierButton(d, w, h, true, isOutlier);
 
   pop();
 }
@@ -2781,6 +2785,8 @@ function getMobileArchiveOutlierButtonAt(px, py) {
 
     let rowPan = archiveRowPan[groupIndex] || 0;
     for (let i = group.length - 1; i >= 0; i--) {
+      let d = group[i].drawing;
+      if (!(d && d.tag === "outlier")) continue;
       let layoutItem = drawBackgroundApplesLayout.find(layout => layout.archiveIndex === group[i].index);
       let offsets = layoutItem ? getArchiveFilmDrawOffsets(layoutItem) : [0];
       let cardY = y;
