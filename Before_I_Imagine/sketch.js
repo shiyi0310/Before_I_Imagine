@@ -191,6 +191,12 @@ let mainCanvas;
 let lastPerformanceFrameRateKey = "";
 let lastToolButtonStyleKey = "";
 let lastButtonVisibilityKey = "";
+const DEBUG_RENDER_LOOP = false;
+let renderLoopActive = true;
+let pendingRedrawReason = "";
+let renderDebugLastLog = 0;
+let archiveIdleTimeoutId = null;
+let activeTimerCount = 0;
 
 function setup() {
   document.body.style.margin = "0";
@@ -233,6 +239,10 @@ function setup() {
 
   startTime = millis();
   archiveLastInteractionTime = millis();
+  resetArchiveIdleTimer();
+  if (typeof window !== "undefined") {
+    window.beforeIImagineDebugRender = () => logRenderDebug(true);
+  }
   
 }
 
@@ -243,7 +253,6 @@ function draw() {
   updateMobileArchiveScrollMode();
   updateArchiveRowInertia();
   updateArchiveRowAutoFollow();
-  updateArchiveIdleAutoplay();
   archiveTargetTransition = (!modalOpen && backgroundViewMode === "archive") ? 1 : 0;
   archiveTransition = lerp(archiveTransition, archiveTargetTransition, 0.06);
 
@@ -261,6 +270,72 @@ function draw() {
 
   updateButtonVisibility();
   updateToolButtonStyles();
+  updateRenderLoopState();
+  pendingRedrawReason = "";
+}
+
+function requestRender(reason = "") {
+  if (reason) pendingRedrawReason = reason;
+  if (!renderLoopActive) redraw();
+}
+
+function archivePlaybackActive() {
+  return (
+    page === "draw" &&
+    !modalOpen &&
+    backgroundViewMode === "archive" &&
+    archiveMode === "autoplay" &&
+    !archiveIsPaused &&
+    !selectedApple
+  );
+}
+
+function selectedApplePlaybackActive() {
+  return Boolean(page === "draw" && selectedApple);
+}
+
+function renderNeedsContinuousLoop() {
+  if (currentAction) return true;
+  if (reflectionModalOpen && reflectionUpdating) return true;
+  if (selectedApplePlaybackActive()) return true;
+  if (archivePlaybackActive()) return true;
+  if (abs(archiveTransition - archiveTargetTransition) > 0.01) return true;
+  if (page === "draw" && !modalOpen && backgroundViewMode === "wall") return true;
+  if (page === "archiveWall" || page === "layer") return true;
+  if (archiveRowDragging || archiveSliceDragging || isWallPanning || isArchivePanning) return true;
+  for (let v of archiveRowVelocity) {
+    if (abs(v || 0) > 0.02) return true;
+  }
+  return false;
+}
+
+function updateRenderLoopState() {
+  let shouldLoop = renderNeedsContinuousLoop();
+  if (shouldLoop && !renderLoopActive) {
+    renderLoopActive = true;
+    loop();
+  } else if (!shouldLoop && renderLoopActive) {
+    renderLoopActive = false;
+    noLoop();
+  }
+  logRenderDebug(false);
+}
+
+function logRenderDebug(force) {
+  if (!DEBUG_RENDER_LOOP && !force) return;
+  let now = millis ? millis() : 0;
+  if (!force && now - renderDebugLastLog < 2000) return;
+  renderDebugLastLog = now;
+  console.log("[Before I Imagine render]", {
+    page,
+    backgroundViewMode,
+    modalOpen,
+    renderLoopActive,
+    fps: frameRate ? Number(frameRate().toFixed(1)) : null,
+    playbackActive: archivePlaybackActive() || selectedApplePlaybackActive(),
+    timers: activeTimerCount,
+    reason: pendingRedrawReason || "frame"
+  });
 }
 
 function updatePerformanceFrameRate() {
@@ -2472,6 +2547,12 @@ function setArchiveMode(mode) {
   } else if (archiveReplayState) {
     archiveReplayState.activeArchiveIndex = [-1, -1, -1, -1];
   }
+  if (mode === "autoplay") {
+    clearArchiveIdleTimer();
+  } else {
+    resetArchiveIdleTimer();
+  }
+  requestRender("archive-mode");
 }
 
 function startArchiveAutoplay() {
@@ -2480,10 +2561,12 @@ function startArchiveAutoplay() {
 
 function pauseArchiveAutoplay() {
   if (archiveMode === "autoplay") archiveIsPaused = true;
+  requestRender("archive-pause");
 }
 
 function resumeArchiveAutoplay() {
   if (archiveMode === "autoplay") archiveIsPaused = false;
+  requestRender("archive-resume");
 }
 
 function stopArchiveAutoplay() {
@@ -2493,17 +2576,45 @@ function stopArchiveAutoplay() {
 function registerArchiveInteraction() {
   archiveLastInteractionTime = millis();
   if (archiveMode === "autoplay") stopArchiveAutoplay();
+  resetArchiveIdleTimer();
+  requestRender("archive-interaction");
 }
 
 function updateArchiveIdleAutoplay() {
-  if (!ENABLE_ARCHIVE_IDLE_AUTOPLAY) return;
-  if (isMobileScreen()) return;
-  if (page !== "draw" || modalOpen || backgroundViewMode !== "archive" || selectedApple) return;
-  if (archiveMode === "autoplay") return;
-  if (!archiveLastInteractionTime) archiveLastInteractionTime = millis();
-  if (millis() - archiveLastInteractionTime >= ARCHIVE_IDLE_DELAY) {
-    startArchiveAutoplay();
-  }
+  resetArchiveIdleTimer();
+}
+
+function clearArchiveIdleTimer() {
+  if (!archiveIdleTimeoutId) return;
+  clearTimeout(archiveIdleTimeoutId);
+  archiveIdleTimeoutId = null;
+  activeTimerCount = max(0, activeTimerCount - 1);
+}
+
+function shouldScheduleArchiveIdleAutoplay() {
+  return (
+    ENABLE_ARCHIVE_IDLE_AUTOPLAY &&
+    !isMobileScreen() &&
+    page === "draw" &&
+    !modalOpen &&
+    backgroundViewMode === "archive" &&
+    !selectedApple &&
+    archiveMode === "explore"
+  );
+}
+
+function resetArchiveIdleTimer() {
+  clearArchiveIdleTimer();
+  if (!shouldScheduleArchiveIdleAutoplay()) return;
+  archiveIdleTimeoutId = setTimeout(() => {
+    archiveIdleTimeoutId = null;
+    activeTimerCount = max(0, activeTimerCount - 1);
+    if (shouldScheduleArchiveIdleAutoplay()) {
+      startArchiveAutoplay();
+      requestRender("archive-idle-autoplay");
+    }
+  }, ARCHIVE_IDLE_DELAY);
+  activeTimerCount++;
 }
 
 function getNextArchiveReplayRow(fromRow) {
@@ -3360,14 +3471,21 @@ function drawDrawingFooter() {
 
 function mousePressed() {
   handlePointerPressed(mouseX, mouseY);
+  requestRender("mouse-pressed");
 }
 
 function mouseDragged() {
   handlePointerDragged(mouseX, mouseY);
+  requestRender("mouse-dragged");
 }
 
 function mouseReleased() {
   handlePointerReleased();
+  requestRender("mouse-released");
+}
+
+function mouseMoved() {
+  if (page === "draw" && !modalOpen) requestRender("mouse-moved");
 }
 
 function mouseClicked() {
@@ -3382,6 +3500,7 @@ function mouseClicked() {
 }
 
 function touchStarted() {
+  requestRender("touch-started");
   if (reflectionModalOpen) {
     return true;
   }
@@ -3427,6 +3546,7 @@ function touchStarted() {
 }
 
 function touchMoved() {
+  requestRender("touch-moved");
   if (reflectionModalOpen) {
     return true;
   }
@@ -3449,6 +3569,7 @@ function touchMoved() {
 }
 
 function touchEnded() {
+  requestRender("touch-ended");
   if (reflectionModalOpen) {
     return true;
   }
@@ -3734,6 +3855,8 @@ function handleDrawPageClick(x, y) {
     selectedApple = null;
     selectedAppleIndex = -1;
     archiveLastInteractionTime = millis();
+    resetArchiveIdleTimer();
+    requestRender("close-apple-popup");
     return true;
   }
 
@@ -3752,6 +3875,7 @@ function handleDrawPageClick(x, y) {
     archiveLastInteractionTime = millis();
     if (switchMode === "draw") {
       modalOpen = true;
+      clearArchiveIdleTimer();
       layoutInterface();
     } else if (backgroundViewMode !== switchMode || modalOpen) {
       backgroundViewMode = switchMode;
@@ -3763,6 +3887,9 @@ function handleDrawPageClick(x, y) {
         archivePan.y = 0;
         generateDrawBackgroundApplesLayout();
         resetArchiveFilmReplay();
+        resetArchiveIdleTimer();
+      } else {
+        clearArchiveIdleTimer();
       }
       if (switchMode === "wall" || switchMode === "slice") {
         generateDrawBackgroundApplesLayout();
@@ -3772,16 +3899,19 @@ function handleDrawPageClick(x, y) {
       }
       layoutInterface();
     }
+    requestRender("view-switch");
     return true;
   }
 
   if (handleAverageAppleClick(x, y)) {
+    requestRender("average-click");
     return true;
   }
 
   let sliceTabIndex = getSlicePromptTabAt(x, y);
   if (sliceTabIndex >= 0) {
     slicePromptIndex = sliceTabIndex;
+    requestRender("slice-tab");
     return true;
   }
 
@@ -3790,12 +3920,16 @@ function handleDrawPageClick(x, y) {
     currentAction = null;
     if (isMobileScreen()) mobileArchiveReady = true;
     layoutInterface();
+    resetArchiveIdleTimer();
+    requestRender("modal-close");
     return true;
   }
 
   if (!modalOpen && backgroundViewMode !== "slice" && backgroundViewMode !== "average" && isClickOnReopenDrawingButton(x, y)) {
     modalOpen = true;
     layoutInterface();
+    clearArchiveIdleTimer();
+    requestRender("modal-open");
     return true;
   }
 
@@ -4071,6 +4205,7 @@ function mouseWheel(event) {
   if (page === "archiveWall") {
     let zoomFactor = exp(-event.delta * 0.0016);
     zoomWallCameraAt(mouseX, mouseY, zoomFactor);
+    requestRender("wall-wheel");
     return false;
   }
 
@@ -4086,6 +4221,7 @@ function mouseWheel(event) {
       markArchiveRowManualInteraction(row);
       applyArchiveRowPanDelta(row, -delta, true);
       archiveRowVelocity[row] = -delta * 0.18;
+      requestRender("archive-wheel");
       return false;
     }
   }
@@ -4100,6 +4236,7 @@ function mouseWheel(event) {
 
   archivePan.y -= event.delta;
   constrainArchivePan();
+  requestRender("archive-pan-wheel");
   return false;
 }
 
@@ -4635,7 +4772,9 @@ function selectArchiveDrawing(index) {
   selectedAppleIndex = index;
   selectedApple = archive[index] || null;
   selectedAppleReplayStartedAt = millis();
+  clearArchiveIdleTimer();
   fetchDrawingDetails(index);
+  requestRender("select-archive-drawing");
 }
 
 async function fetchDrawingDetails(index) {
@@ -4660,6 +4799,7 @@ async function fetchDrawingDetails(index) {
       selectedApple = archive[index];
       selectedAppleReplayStartedAt = millis();
     }
+    requestRender("drawing-details-loaded");
   } catch (error) {
     console.warn("Could not load full drawing details:", error);
   }
@@ -4873,9 +5013,11 @@ function getPreviewImage(d) {
     (img) => {
       entry.img = img;
       entry.loaded = true;
+      requestRender("image-loaded");
     },
     () => {
       entry.failed = true;
+      requestRender("image-failed");
     }
   );
 
@@ -4891,6 +5033,8 @@ function refreshArchiveViews() {
   generateDrawBackgroundApplesLayout();
   if (page === "stack") selectFirstAvailableStackPrompt();
   markStackDirty();
+  resetArchiveIdleTimer();
+  requestRender("archive-refreshed");
 }
 
 function normalizeDrawingData(d) {
@@ -6472,4 +6616,6 @@ function windowResized() {
   generateLayerLayout();
   generateDrawBackgroundApplesLayout();
   markStackDirty();
+  resetArchiveIdleTimer();
+  requestRender("window-resized");
 }
