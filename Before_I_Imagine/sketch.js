@@ -1481,6 +1481,7 @@ function drawFloatingArchiveApples() {
 }
 
 function getArchiveFilmDrawOffsets(item) {
+  if (isMobileScreen()) return [0];
   let cycleW = getArchiveFilmLoopWidth(item.rowIndex);
   if (cycleW <= 0) return [0];
   let rowPan = archiveRowPan[item.rowIndex] || 0;
@@ -2408,6 +2409,7 @@ function getNextArchiveReplayRow(fromRow) {
 }
 
 function updateArchiveFilmReplay() {
+  if (isMobileScreen()) return;
   ensureArchiveFilmReplayState();
   if (
     !archiveReplayState ||
@@ -2541,6 +2543,7 @@ function ensureArchiveFilmReplayData(archiveIndex) {
 }
 
 function isArchiveFilmItemReplaying(item) {
+  if (isMobileScreen()) return false;
   return Boolean(
     backgroundViewMode === "archive" &&
     !selectedApple &&
