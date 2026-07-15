@@ -80,7 +80,7 @@ let paperCol = "#fbfaf6";
 let inkCol = "#161616";
 let mutedCol = "#77716a";
 let lineCol = "#b9afa2";
-let interfaceFont = '"Courier New", Courier, monospace';
+let interfaceFont = '"JetBrains Mono", "IBM Plex Mono", Menlo, monospace';
 
 let clearBtn;
 let submitBtn;
@@ -2376,10 +2376,10 @@ function getArchiveRowLabel(rowIndex) {
 
 function getArchiveRowInfo(rowIndex) {
   let infos = [
-    { task: "TASK 01", title: "DEFAULT", desc: "The apple I already know" },
-    { task: "TASK 02", title: "TOUCH MEMORY", desc: "The apple my hand remembers" },
-    { task: "TASK 03", title: "TASTE MEMORY", desc: "The apple my mouth remembers" },
-    { task: "TASK 04", title: "IMPERFECT MEMORY", desc: "The imperfect apple" }
+    { task: "PROMPT 01", title: "DEFAULT APPLE", desc: "The apple I already know." },
+    { task: "PROMPT 02", title: "TOUCH MEMORY", desc: "The apple my hand remembers." },
+    { task: "PROMPT 03", title: "TASTE MEMORY", desc: "The apple my mouth remembers." },
+    { task: "PROMPT 04", title: "IMPERFECT MEMORY", desc: "The imperfect apple." }
   ];
   return infos[rowIndex] || infos[0];
 }
@@ -2795,16 +2795,16 @@ function drawMemoryArchiveView() {
     let info = getArchiveRowInfo(i);
     let y = rowY + i * getArchiveRowGap();
     noStroke();
-    fill(86, 78, 70, 135);
+    fill(26, 26, 26, 150);
     textAlign(LEFT);
-    textSize(9);
+    textSize(10);
     text(info.task, x0, y - 4);
-    fill(54, 49, 44, 172);
-    textSize(11);
+    fill(26, 26, 26, 232);
+    textSize(isCompactDesktop() ? 18 : 21);
     text(info.title, x0, y + 14, metrics.promptInfoW - 18);
-    fill(112, 104, 94, 142);
-    textSize(9.5);
-    text(info.desc, x0, y + 32, metrics.promptInfoW - 24);
+    fill(26, 26, 26, 166);
+    textSize(isCompactDesktop() ? 11 : 12);
+    text(info.desc, x0, y + 44, metrics.promptInfoW - 24);
 
     stroke(214, 205, 193, 115);
     strokeWeight(1);
@@ -2850,11 +2850,15 @@ function drawMobileArchiveView() {
       .map((drawing, index) => ({ drawing, index }))
       .filter(item => getArchivePromptGroupIndex(item.drawing) === groupIndex);
 
-    fill(78, 70, 62, 170);
-    textSize(11);
+    let info = getArchiveRowInfo(groupIndex);
+    fill(26, 26, 26, 150);
+    textSize(9);
     textAlign(LEFT);
-    text(getArchiveRowLabel(groupIndex), pad, y);
-    y += 24;
+    text(info.task, pad, y);
+    fill(26, 26, 26, 220);
+    textSize(13);
+    text(info.title, pad, y + 18);
+    y += 36;
 
     if (group.length === 0) {
       fill(130, 122, 112, 130);
@@ -2932,7 +2936,7 @@ function getMobileArchiveCardAt(px, py) {
       .map((drawing, index) => ({ drawing, index }))
       .filter(item => getArchivePromptGroupIndex(item.drawing) === groupIndex);
 
-    y += 24;
+    y += 36;
 
     if (group.length === 0) {
       y += 48;
@@ -2969,7 +2973,7 @@ function getMobileArchiveOutlierButtonAt(px, py) {
     let group = archive
       .map((drawing, index) => ({ drawing, index }))
       .filter(item => getArchivePromptGroupIndex(item.drawing) === groupIndex);
-    y += 24;
+    y += 36;
     if (group.length === 0) {
       y += 48;
       continue;
@@ -3001,7 +3005,7 @@ function getMobileArchiveContentHeight() {
   let metrics = getArchiveFilmMetrics();
   for (let groupIndex = 0; groupIndex < 4; groupIndex++) {
     let count = archive.filter(d => getArchivePromptGroupIndex(d) === groupIndex).length;
-    y += 24;
+    y += 36;
     y += count > 0 ? metrics.cardH + 58 : 48;
   }
   return y + 48;
@@ -3032,17 +3036,17 @@ function drawSelectedApplePopup() {
   rect(r.x + 0.5, r.y + 0.5, r.w - 1, r.h - 1, 8);
 
   noStroke();
-  fill(inkCol);
+  fill("#1A1A1A");
   textAlign(LEFT);
-  textSize(13);
-  text(`#${selectedAppleIndex + 1}`, r.x + 22, r.y + 30);
+  textSize(18);
+  text("RECORD " + String(selectedAppleIndex + 1), r.x + 22, r.y + 30);
 
-  fill(72);
-  textSize(10);
-  text(formatArchiveTime(selectedApple), r.x + 22, r.y + 50);
-
+  fill(26, 26, 26, 166);
+  textSize(11);
+  text(formatArchiveRecordDate(selectedApple), r.x + 22, r.y + 56);
   let duration = selectedApple.durationSeconds !== undefined ? `${selectedApple.durationSeconds}s` : "undated";
-  text(`${duration} · ${countDrawingUnits(selectedApple)} trace units`, r.x + 22, r.y + 66);
+  text(duration, r.x + 22, r.y + 74);
+  text(`${countDrawingUnits(selectedApple)} trace units`, r.x + 22, r.y + 92);
 
   stroke(inkCol);
   strokeWeight(1.2);
@@ -3050,9 +3054,9 @@ function drawSelectedApplePopup() {
   line(close.x + close.w - 2, close.y + 2, close.x + 2, close.y + close.h - 2);
 
   let thumbX = r.x + 22;
-  let thumbY = r.y + 88;
+  let thumbY = r.y + 116;
   let thumbW = r.w - 44;
-  let thumbH = min(260, r.h * 0.46);
+  let thumbH = min(250, r.h * 0.4);
 
   fill(paperCol);
   stroke(226, 220, 210);
@@ -3064,21 +3068,32 @@ function drawSelectedApplePopup() {
   pop();
 
   let promptKey = getDrawingPromptIndex(selectedApple);
-  let taskText = prompts[promptKey] ? prompts[promptKey].task : "TASK";
+  let taskText = getArchivePromptRecordLabel(promptKey);
   let titleText = prompts[promptKey] ? prompts[promptKey].shortTitle : "";
-  let textY = thumbY + thumbH + 36;
+  let textY = thumbY + thumbH + 38;
 
   noStroke();
-  fill(inkCol);
-  textSize(11);
+  fill("#1A1A1A");
+  textSize(13);
   text(taskText, r.x + 22, textY);
-  fill(70);
-  textSize(10);
+  fill(26, 26, 26, 166);
+  textSize(12);
   text(titleText, r.x + 22, textY + 24, r.w - 44);
 
-  let extraY = textY + 62;
+  let extraY = textY + 64;
+  if (selectedApple.reflection_text) {
+    fill("#1A1A1A");
+    textSize(11);
+    text("Reflection", r.x + 22, extraY);
+    fill(26, 26, 26, 217);
+    textSize(13);
+    textLeading(19);
+    text(selectedApple.reflection_text, r.x + 22, extraY + 24, r.w - 44, max(70, r.y + r.h - extraY - 42));
+    extraY += 118;
+  }
+
   if (selectedApple.match !== undefined) {
-    fill(inkCol);
+    fill("#1A1A1A");
     textSize(10);
     text("MATCH", r.x + 22, extraY);
     stroke(205, 198, 188);
@@ -3093,10 +3108,10 @@ function drawSelectedApplePopup() {
   }
 
   if (selectedApple.notes) {
-    fill(inkCol);
+    fill("#1A1A1A");
     textSize(10);
     text("NOTES", r.x + 22, extraY);
-    fill(70);
+    fill(26, 26, 26, 166);
     textSize(10);
     text(selectedApple.notes, r.x + 22, extraY + 26, r.w - 44, 70);
   }
@@ -3104,7 +3119,7 @@ function drawSelectedApplePopup() {
 
 function getApplePopupRect() {
   let w = isMobileScreen() ? min(width - 36, 340) : min(520, width - getDrawSidebarWidth() - 120);
-  let h = isMobileScreen() ? min(height - 120, 520) : min(560, height - 120);
+  let h = isMobileScreen() ? min(height - 90, 560) : min(640, height - 96);
   let sidebarW = isMobileScreen() ? 0 : getDrawSidebarWidth();
   let x = isMobileScreen() ? (width - w) / 2 : sidebarW + (width - sidebarW - w) / 2;
   let y = isMobileScreen() ? 88 : max(92, (height - h) / 2);
@@ -3867,7 +3882,7 @@ function getArchiveRowAt(x, y) {
     let rowY = 86 - getMobileArchiveScrollY() + 62;
     let cardH = getArchiveFilmMetrics().cardH;
     for (let i = 0; i < 4; i++) {
-      rowY += 24;
+      rowY += 36;
       let count = archive.filter(d => getArchivePromptGroupIndex(d) === i).length;
       if (count > 0 && y >= rowY - 18 && y <= rowY + cardH + 18) return i;
       rowY += count > 0 ? cardH + 58 : 48;
@@ -6372,6 +6387,21 @@ function formatArchiveTime(d) {
     : "undated";
   let duration = d.durationSeconds !== undefined ? ` / ${d.durationSeconds}s` : "";
   return `${dateText}${duration}`;
+}
+
+function formatArchiveRecordDate(d) {
+  let date = d && d.createdAt ? new Date(d.createdAt) : null;
+  if (!date || isNaN(date.getTime())) return "undated";
+  return [
+    String(date.getMonth() + 1).padStart(2, "0"),
+    String(date.getDate()).padStart(2, "0"),
+    String(date.getFullYear())
+  ].join(".");
+}
+
+function getArchivePromptRecordLabel(promptKey) {
+  let info = getArchiveRowInfo(Number(promptKey));
+  return `${info.task} / ${info.title}`;
 }
 
 function drawWallHoverLabel(d, index, layout) {
