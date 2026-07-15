@@ -2351,6 +2351,7 @@ function resetArchiveFilmReplay() {
   archiveRowAutoPanTarget = [null, null, null, null];
   archiveRowManualPauseUntil = [0, 0, 0, 0];
   archiveReplayState = {
+    activeRow: 0,
     cursor: [0, 0, 0, 0],
     activeArchiveIndex: [-1, -1, -1, -1],
     activeLoop: [0, 0, 0, 0],
@@ -2398,6 +2399,14 @@ function drawingHasReplayData(d) {
   return Boolean(d && Array.isArray(d.actions) && d.actions.length > 0);
 }
 
+function getNextArchiveReplayRow(fromRow) {
+  for (let offset = 1; offset <= 4; offset++) {
+    let row = (fromRow + offset) % 4;
+    if (getArchiveFilmRowItems(row).length > 0) return row;
+  }
+  return fromRow;
+}
+
 function updateArchiveFilmReplay() {
   ensureArchiveFilmReplayState();
   if (
@@ -2410,55 +2419,59 @@ function updateArchiveFilmReplay() {
     return;
   }
 
-  for (let row = 0; row < 4; row++) {
-    let rowItems = getArchiveFilmRowItems(row);
-    if (rowItems.length === 0) continue;
-    if (millis() < (archiveReplayState.pauseUntil[row] || 0)) continue;
-    if (millis() < (archiveRowManualPauseUntil[row] || 0)) continue;
+  let row = archiveReplayState.activeRow || 0;
+  let rowItems = getArchiveFilmRowItems(row);
+  if (rowItems.length === 0) {
+    archiveReplayState.activeRow = getNextArchiveReplayRow(row);
+    return;
+  }
+  if (millis() < (archiveReplayState.pauseUntil[row] || 0)) return;
+  if (millis() < (archiveRowManualPauseUntil[row] || 0)) return;
 
-    let cursor = archiveReplayState.cursor[row] || 0;
-    let sequenceIndex = cursor % rowItems.length;
-    let loop = floor(cursor / rowItems.length);
-    let item = rowItems[sequenceIndex];
-    let phase = archiveReplayState.phase[row];
+  let cursor = archiveReplayState.cursor[row] || 0;
+  let sequenceIndex = cursor % rowItems.length;
+  let loop = floor(cursor / rowItems.length);
+  let item = rowItems[sequenceIndex];
+  let phase = archiveReplayState.phase[row];
 
-    if (phase === "move") {
-      if (!archiveFilmItemReadyToReplay(item, loop)) {
-        requestArchiveRowAutoFollow(row, item, loop);
-        continue;
-      }
-      archiveRowAutoPanTarget[row] = null;
-      archiveReplayState.activeArchiveIndex[row] = item.archiveIndex;
-      archiveReplayState.activeLoop[row] = loop;
-      archiveReplayState.phase[row] = "replay";
-      archiveReplayState.phaseStartedAt[row] = millis();
-      continue;
+  if (phase === "move") {
+    if (!archiveFilmItemReadyToReplay(item, loop)) {
+      requestArchiveRowAutoFollow(row, item, loop);
+      return;
     }
+    archiveRowAutoPanTarget[row] = null;
+    archiveReplayState.activeArchiveIndex = [-1, -1, -1, -1];
+    archiveReplayState.activeArchiveIndex[row] = item.archiveIndex;
+    archiveReplayState.activeLoop[row] = loop;
+    archiveReplayState.phase[row] = "replay";
+    archiveReplayState.phaseStartedAt[row] = millis();
+    return;
+  }
 
-    if (phase === "replay") {
-      let d = archive[item.archiveIndex];
-      if (!drawingHasReplayData(d)) {
-        ensureArchiveFilmReplayData(item.archiveIndex);
-        if (millis() - archiveReplayState.phaseStartedAt[row] > 700) {
-          archiveReplayState.activeArchiveIndex[row] = -1;
-          archiveReplayState.phase[row] = "pause";
-          archiveReplayState.pauseUntil[row] = millis() + 120;
-        }
-        continue;
-      }
-      if (millis() - archiveReplayState.phaseStartedAt[row] >= getArchiveFilmReplayDuration(d)) {
+  if (phase === "replay") {
+    let d = archive[item.archiveIndex];
+    if (!drawingHasReplayData(d)) {
+      ensureArchiveFilmReplayData(item.archiveIndex);
+      if (millis() - archiveReplayState.phaseStartedAt[row] > 700) {
         archiveReplayState.activeArchiveIndex[row] = -1;
         archiveReplayState.phase[row] = "pause";
-        archiveReplayState.pauseUntil[row] = millis() + 140;
+        archiveReplayState.pauseUntil[row] = millis() + 180;
       }
-      continue;
+      return;
     }
+    if (millis() - archiveReplayState.phaseStartedAt[row] >= getArchiveFilmReplayDuration(d)) {
+      archiveReplayState.activeArchiveIndex[row] = -1;
+      archiveReplayState.phase[row] = "pause";
+      archiveReplayState.pauseUntil[row] = millis() + 220;
+    }
+    return;
+  }
 
-    if (phase === "pause") {
-      archiveReplayState.cursor[row] = cursor + 1;
-      archiveReplayState.phase[row] = "move";
-      archiveReplayState.phaseStartedAt[row] = millis();
-    }
+  if (phase === "pause") {
+    archiveReplayState.cursor[row] = cursor + 1;
+    archiveReplayState.phase[row] = "move";
+    archiveReplayState.phaseStartedAt[row] = millis();
+    archiveReplayState.activeRow = getNextArchiveReplayRow(row);
   }
 }
 
@@ -2551,7 +2564,7 @@ function getArchiveFilmReplayLimitForIndex(d, archiveIndex) {
 
 function getArchiveFilmReplayDuration(d) {
   let units = countDrawingUnits(d);
-  return constrain(map(units, 20, 900, 800, 1500), 800, 1500);
+  return constrain(map(units, 20, 900, 1800, 2800), 1800, 2800);
 }
 
 function getArchiveFilmReplayLimit(d, item) {
