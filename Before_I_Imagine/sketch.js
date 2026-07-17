@@ -1023,7 +1023,9 @@ function drawImmersiveDrawingPage() {
 
   drawPaperBackground();
   if (!isMobileScreen()) {
-    if (backgroundViewMode === "average") {
+    if (backgroundViewMode === "report") {
+      drawAppleReportView();
+    } else if (backgroundViewMode === "average") {
       drawAverageAppleView();
     } else if (backgroundViewMode === "archive") {
       drawMemoryArchiveView();
@@ -1034,7 +1036,9 @@ function drawImmersiveDrawingPage() {
     drawDrawPageSidebar();
     drawBackgroundViewSwitcher();
   } else if (mobileArchiveReady && !modalOpen) {
-    if (backgroundViewMode === "average") {
+    if (backgroundViewMode === "report") {
+      drawAppleReportView();
+    } else if (backgroundViewMode === "average") {
       drawAverageAppleView();
     } else if (backgroundViewMode === "archive") {
       drawMobileArchiveView();
@@ -1057,7 +1061,7 @@ function drawImmersiveDrawingPage() {
     drawToolbarPanel();
     drawDrawingModalClose();
     drawDrawingFooter();
-  } else if (backgroundViewMode !== "slice" && backgroundViewMode !== "average") {
+  } else if (backgroundViewMode !== "slice" && backgroundViewMode !== "average" && backgroundViewMode !== "report") {
     drawReopenDrawingButton();
   }
 
@@ -1162,7 +1166,7 @@ function drawDrawingModalShadow() {
 }
 
 function getBackgroundViewSwitcherRect() {
-  let w = isMobileScreen() ? min(width - 24, 360) : 540;
+  let w = isMobileScreen() ? min(width - 24, 360) : min(690, width - getDrawSidebarWidth() - 36);
   let h = isMobileScreen() ? 40 : 52;
   let x = isMobileScreen() ? (width - w) / 2 : getDrawSidebarWidth() + (width - getDrawSidebarWidth() - w) / 2;
   let y = isMobileScreen() ? 20 : 28;
@@ -1212,13 +1216,14 @@ function getTopToolbarOptions(r) {
     { mode: "draw", label: "DRAW", w: 48 },
     { mode: "wall", label: "WALL", w: 48 },
     { mode: "archive", label: "ARCHIVE", w: 68 },
-    { mode: "average", label: "AVERAGE", w: 72 }
+    { mode: "report", label: "REPORT", w: 62 }
   ] : [
     { mode: "draw", label: "DRAW", w: 62 },
     { mode: "archive", label: "ARCHIVE", w: 82 },
     { mode: "wall", label: "WALL", w: 62 },
     { mode: "slice", label: "SLICE", w: 62 },
-    { mode: "average", label: "AVERAGE APPLE", w: 112 }
+    { mode: "average", label: "AVERAGE APPLE", w: 112 },
+    { mode: "report", label: "REPORT", w: 72 }
   ];
   let sidePadding = isMobileScreen() ? 14 : 24;
   let labelsW = labels.reduce((sum, item) => sum + item.w, 0);
@@ -1253,7 +1258,7 @@ function getModalCloseRect() {
 }
 
 function drawReopenDrawingButton() {
-  if (backgroundViewMode === "slice" || backgroundViewMode === "average") return;
+  if (backgroundViewMode === "slice" || backgroundViewMode === "average" || backgroundViewMode === "report") return;
 
   let r = getReopenDrawingButtonRect();
 
@@ -3908,6 +3913,11 @@ function handleDrawPageClick(x, y) {
     return true;
   }
 
+  if (handleAppleReportClick(x, y)) {
+    requestRender("report-click");
+    return true;
+  }
+
   let sliceTabIndex = getSlicePromptTabAt(x, y);
   if (sliceTabIndex >= 0) {
     slicePromptIndex = sliceTabIndex;
@@ -3925,7 +3935,13 @@ function handleDrawPageClick(x, y) {
     return true;
   }
 
-  if (!modalOpen && backgroundViewMode !== "slice" && backgroundViewMode !== "average" && isClickOnReopenDrawingButton(x, y)) {
+  if (
+    !modalOpen &&
+    backgroundViewMode !== "slice" &&
+    backgroundViewMode !== "average" &&
+    backgroundViewMode !== "report" &&
+    isClickOnReopenDrawingButton(x, y)
+  ) {
     modalOpen = true;
     layoutInterface();
     clearArchiveIdleTimer();
