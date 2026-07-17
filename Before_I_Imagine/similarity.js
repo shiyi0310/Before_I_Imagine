@@ -3,7 +3,8 @@
 
 const REPORT_MASK_SIZE = 144;
 const REPORT_MASK_PADDING = 16;
-const REPORT_MATCH_RADIUS = 4;
+const REPORT_MATCH_RADIUS = 3;
+const REPORT_STRICT_RADIUS = 1;
 const REPORT_SESSION_STORAGE_KEY = "beforeIImagineReportDrawingIds";
 
 let reportSimilarityScores = [null, null, null, null];
@@ -405,14 +406,24 @@ function findClosestReportDrawing(personalMask, candidates) {
   let finalists = ranked.slice(0, Math.min(6, ranked.length));
   let best = { drawing: null, score: 0 };
   for (let finalist of finalists) {
-    let refinedScore = findBestReportMaskScore(
+    let tolerantScore = findBestReportMaskScore(
       personalMask,
       finalist.candidate.mask
     );
-    if (refinedScore > best.score) {
+    let strictScore = scoreReportMasks(
+      personalMask,
+      finalist.candidate.mask,
+      REPORT_STRICT_RADIUS
+    );
+    let blendedScore = tolerantScore * 0.7 + strictScore * 0.3;
+    let calibratedScore = 100 * Math.pow(
+      constrain(blendedScore / 100, 0, 1),
+      1.45
+    );
+    if (calibratedScore > best.score) {
       best = {
         drawing: finalist.candidate.drawing,
-        score: refinedScore
+        score: calibratedScore
       };
     }
   }
@@ -421,9 +432,9 @@ function findClosestReportDrawing(personalMask, candidates) {
 
 function findBestReportMaskScore(personalMask, collectiveMask) {
   let bestScore = 0;
-  let translations = [-6, 0, 6];
-  let scales = [0.94, 1, 1.06];
-  let rotations = [-4, 0, 4];
+  let translations = [-4, 0, 4];
+  let scales = [0.96, 1, 1.04];
+  let rotations = [-3, 0, 3];
   let dilatedCollective = dilateReportMask(collectiveMask, REPORT_MATCH_RADIUS);
 
   for (let scaleValue of scales) {
