@@ -59,6 +59,7 @@ let reflectionContinueBtn;
 let reflectionError = "";
 let reflectionUpdating = false;
 let lastUndoTime = 0;
+let repairingMissingDrawingImages = false;
 
 let actions = [];
 let currentAction = null;
@@ -4877,7 +4878,7 @@ function getCroppedSourceImage(sourceLayer, cropRect) {
   let w = constrain(floor(cropRect.w || sourceLayer.width), 1, sourceLayer.width - x);
   let h = constrain(floor(cropRect.h || sourceLayer.height), 1, sourceLayer.height - y);
 
-  let cropped = sourceLayer.get(x, y, w, h);
+  let cropped = copyGraphicsRegionAtLogicalDensity(sourceLayer, x, y, w, h);
   let contentBounds = getOpaquePixelBounds(cropped, 8);
   if (!contentBounds) return cropped;
 
@@ -4888,6 +4889,46 @@ function getCroppedSourceImage(sourceLayer, cropRect) {
   let contentH = min(cropped.height - contentY, contentBounds.h + padding * 2);
 
   return cropped.get(contentX, contentY, contentW, contentH);
+}
+
+function copyGraphicsRegionAtLogicalDensity(sourceLayer, x, y, w, h) {
+  let copy = createGraphics(w, h);
+  copy.pixelDensity(1);
+  copy.clear();
+  copy.smooth();
+
+  let sourceCanvas = sourceLayer.canvas || sourceLayer.elt;
+  let scaleX = sourceCanvas && sourceLayer.width
+    ? sourceCanvas.width / sourceLayer.width
+    : 1;
+  let scaleY = sourceCanvas && sourceLayer.height
+    ? sourceCanvas.height / sourceLayer.height
+    : 1;
+
+  if (sourceCanvas) {
+    copy.drawingContext.drawImage(
+      sourceCanvas,
+      x * scaleX,
+      y * scaleY,
+      w * scaleX,
+      h * scaleY,
+      0,
+      0,
+      w,
+      h
+    );
+  }
+
+  let result = copy.get();
+  try {
+    if (copy.canvas && copy.canvas.parentNode) {
+      copy.canvas.parentNode.removeChild(copy.canvas);
+    }
+  } catch (error) {
+    console.warn("Could not remove density-safe crop canvas:", error);
+  }
+
+  return result;
 }
 
 function getOpaquePixelBounds(img, alphaThreshold = 8) {
@@ -4993,6 +5034,149 @@ function createDrawingPreviewDataURL(drawingData, previewW, previewH) {
   }
 
   return dataURL;
+}
+
+async function regenerateMissingDrawingImages(batchSize = 5) {
+  if (repairingMissingDrawingImages) {
+    console.warn("Image repair is already running.");
+    return;
+  }
+
+  repairingMissingDrawingImages = true;
+  let limit = constrain(floor(Number(batchSize) || 5), 1, 10);
+
+  try {
+    let response = await fetch(`/api/drawings/missing-images?limit=${limit}`);
+    if (!response.ok) throw new Error(await response.text());
+
+    let payload = await response.json();
+    let drawings = Array.isArray(payload.drawings) ? payload.drawings : [];
+    if (drawings.length === 0) {
+      console.info("No drawings are missing image URLs.");
+      return;
+    }
+
+    for (let i = 0; i < drawings.length; i++) {
+      let drawing = normalizeDrawingData(drawings[i]);
+      if (!drawing || !drawing.dbId || !Array.isArray(drawing.actions)) {
+        console.warn("Skipping an invalid drawing record:", drawings[i] && drawings[i].dbId);
+        continue;
+      }
+
+      let source = renderStoredDrawingAtOriginalSize(drawing);
+      let crop = drawing.drawingArea || {
+        x: 0,
+        y: drawing.headerHeight || 0,
+        w: drawing.canvasWidth || source.width,
+        h: max(1, (drawing.canvasHeight || source.height) - (drawing.headerHeight || 0))
+      };
+      let imageDataUrl = createDrawingLayerImageDataURL(source, crop.w, crop.h, 0.82, crop);
+      let thumbDataUrl = createDrawingLayerImageDataURL(source, 420, 420, 0.72, crop);
+
+      let updateResponse = await fetch(`/api/drawings/${drawing.dbId}/images`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          imageDataUrl,
+          thumbDataUrl
+        })
+      });
+
+      removeTemporaryGraphics(source);
+      if (!updateResponse.ok) throw new Error(await updateResponse.text());
+      console.info(`Regenerated drawing image ${i + 1} / ${drawings.length}`, drawing.dbId);
+    }
+
+    await loadArchive();
+    refreshArchiveViews();
+    console.info(`Image repair batch complete: ${drawings.length} processed.`);
+  } catch (error) {
+    console.error("Could not regenerate missing drawing images:", error);
+  } finally {
+    repairingMissingDrawingImages = false;
+  }
+}
+
+function renderStoredDrawingAtOriginalSize(drawing) {
+  let w = max(1, floor(drawing.canvasWidth || width));
+  let h = max(1, floor(drawing.canvasHeight || height));
+  let g = createGraphics(w, h);
+  g.pixelDensity(1);
+  g.clear();
+  g.smooth();
+
+  let area = drawing.drawingArea || {
+    x: 0,
+    y: drawing.headerHeight || 0,
+    w,
+    h: max(1, h - (drawing.headerHeight || 0))
+  };
+  let minX = constrain(floor(area.x || 0), 0, w - 1);
+  let minY = constrain(floor(area.y || 0), 0, h - 1);
+  let maxX = constrain(floor(minX + (area.w || w) - 1), minX, w - 1);
+  let maxY = constrain(floor(minY + (area.h || h) - 1), minY, h - 1);
+
+  for (let action of drawing.actions || []) {
+    if (action.type === "stroke") {
+      drawStoredStrokeOnGraphics(g, action);
+    } else if (action.type === "fill") {
+      floodFillOnGraphics(
+        g,
+        floor(action.x),
+        floor(action.y),
+        action.color,
+        minX,
+        minY,
+        maxX,
+        maxY
+      );
+    }
+  }
+
+  return g;
+}
+
+function drawStoredStrokeOnGraphics(g, action) {
+  let points = action.points || [];
+  if (action.tool === "eraser") {
+    g.erase();
+    g.stroke(0);
+    g.fill(0);
+  } else {
+    g.noErase();
+    g.stroke(action.color || "#111111");
+    g.fill(action.color || "#111111");
+  }
+
+  g.strokeWeight(action.tool === "eraser" ? action.size * 2.2 : action.size);
+  g.strokeCap(ROUND);
+  g.strokeJoin(ROUND);
+
+  if (points.length === 1) {
+    g.noStroke();
+    g.circle(points[0].x, points[0].y, action.tool === "eraser" ? action.size * 2.2 : action.size);
+  } else {
+    for (let i = 1; i < points.length; i++) {
+      g.line(points[i - 1].x, points[i - 1].y, points[i].x, points[i].y);
+    }
+  }
+  g.noErase();
+}
+
+function removeTemporaryGraphics(g) {
+  try {
+    if (g && g.canvas && g.canvas.parentNode) {
+      g.canvas.parentNode.removeChild(g.canvas);
+    }
+  } catch (error) {
+    console.warn("Could not remove temporary repair graphics:", error);
+  }
+}
+
+if (typeof window !== "undefined") {
+  window.regenerateMissingDrawingImages = regenerateMissingDrawingImages;
 }
 
 function hasPreviewData(d) {
