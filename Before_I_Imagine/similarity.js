@@ -5,6 +5,7 @@ const REPORT_MASK_SIZE = 144;
 const REPORT_MASK_PADDING = 16;
 const REPORT_MATCH_RADIUS = 3;
 const REPORT_STRICT_RADIUS = 1;
+const REPORT_MIN_MATCH_SCORE = 35;
 const REPORT_SESSION_STORAGE_KEY = "beforeIImagineReportDrawingIds";
 
 let reportSimilarityScores = [null, null, null, null];
@@ -18,6 +19,11 @@ let reportSessionRestored = false;
 function getReportSimilarityScore(promptIndex) {
   let score = reportSimilarityScores[promptIndex];
   return Number.isFinite(score) ? score : null;
+}
+
+function hasCloseReportMatch(promptIndex) {
+  let score = getReportSimilarityScore(promptIndex);
+  return Number.isFinite(score) && score >= REPORT_MIN_MATCH_SCORE;
 }
 
 function setReportSimilarityScore(promptIndex, score) {
@@ -386,39 +392,21 @@ function findReportRepresentative(candidates, collectiveMask) {
 }
 
 function findClosestReportDrawing(personalMask, candidates) {
-  let dilatedPersonal = dilateReportMask(personalMask, REPORT_MATCH_RADIUS);
   let ranked = candidates.map((candidate) => {
-    let candidateDilated = dilateReportMask(candidate.mask, REPORT_MATCH_RADIUS);
     return {
       candidate,
-      score: scoreReportMasks(
-        personalMask,
-        candidate.mask,
-        REPORT_MATCH_RADIUS,
-        dilatedPersonal,
-        candidateDilated
-      )
+      score: scoreReportShapeSimilarity(personalMask, candidate.mask)
     };
   }).sort((a, b) => b.score - a.score);
 
   // Normalization already handles most alignment. Apply the more expensive
   // transform search only to the strongest coarse candidates.
-  let finalists = ranked.slice(0, Math.min(6, ranked.length));
+  let finalists = ranked.slice(0, Math.min(5, ranked.length));
   let best = { drawing: null, score: 0 };
   for (let finalist of finalists) {
-    let tolerantScore = findBestReportMaskScore(
+    let calibratedScore = findBestReportShapeScore(
       personalMask,
       finalist.candidate.mask
-    );
-    let strictScore = scoreReportMasks(
-      personalMask,
-      finalist.candidate.mask,
-      REPORT_STRICT_RADIUS
-    );
-    let blendedScore = tolerantScore * 0.7 + strictScore * 0.3;
-    let calibratedScore = 100 * Math.pow(
-      constrain(blendedScore / 100, 0, 1),
-      1.45
     );
     if (calibratedScore > best.score) {
       best = {
@@ -428,6 +416,241 @@ function findClosestReportDrawing(personalMask, candidates) {
     }
   }
   return best;
+}
+
+function findBestReportShapeScore(personalMask, candidateMask) {
+  let bestScore = scoreReportShapeSimilarity(personalMask, candidateMask);
+  let transforms = [
+    { scale: 0.97, rotation: 0 },
+    { scale: 1.03, rotation: 0 },
+    { scale: 1, rotation: -3 },
+    { scale: 1, rotation: 3 }
+  ];
+
+  for (let transform of transforms) {
+    let transformed = transformReportMask(
+      personalMask,
+      transform.scale,
+      transform.rotation,
+      0,
+      0
+    );
+    bestScore = Math.max(
+      bestScore,
+      scoreReportShapeSimilarity(transformed, candidateMask)
+    );
+  }
+
+  return 100 * Math.pow(constrain(bestScore / 100, 0, 1), 1.12);
+}
+
+function scoreReportShapeSimilarity(firstMask, secondMask) {
+  let contourScore = scoreReportContourDistance(firstMask, secondMask);
+  let layoutScore = scoreReportSpatialLayout(firstMask, secondMask);
+  let firstInterior = createReportInteriorMask(firstMask);
+  let secondInterior = createReportInteriorMask(secondMask);
+  let firstHasInterior = firstInterior.count >= REPORT_MASK_SIZE * REPORT_MASK_SIZE * 0.008;
+  let secondHasInterior = secondInterior.count >= REPORT_MASK_SIZE * REPORT_MASK_SIZE * 0.008;
+
+  if (firstHasInterior && secondHasInterior) {
+    let silhouetteScore = scoreReportBinaryDice(
+      firstInterior.mask,
+      secondInterior.mask
+    );
+    return contourScore * 0.48 + silhouetteScore * 0.38 + layoutScore * 0.14;
+  }
+
+  let openShapeScore = contourScore * 0.72 + layoutScore * 0.28;
+  if (firstHasInterior !== secondHasInterior) {
+    openShapeScore *= 0.48;
+  }
+  return openShapeScore;
+}
+
+function scoreReportContourDistance(firstMask, secondMask) {
+  let firstCount = countReportMaskPixels(firstMask);
+  let secondCount = countReportMaskPixels(secondMask);
+  if (firstCount === 0 || secondCount === 0) return 0;
+
+  let distanceToFirst = createReportDistanceField(firstMask);
+  let distanceToSecond = createReportDistanceField(secondMask);
+  let firstScore = 0;
+  let secondScore = 0;
+  let sigma = 3.4;
+
+  for (let i = 0; i < firstMask.length; i++) {
+    if (firstMask[i]) {
+      let distance = distanceToSecond[i];
+      firstScore += Math.exp(-(distance * distance) / (2 * sigma * sigma));
+    }
+    if (secondMask[i]) {
+      let distance = distanceToFirst[i];
+      secondScore += Math.exp(-(distance * distance) / (2 * sigma * sigma));
+    }
+  }
+
+  return 100 * ((firstScore / firstCount) + (secondScore / secondCount)) / 2;
+}
+
+function createReportDistanceField(mask) {
+  let size = REPORT_MASK_SIZE;
+  let distance = new Float32Array(mask.length);
+  let infinity = size * 4;
+  for (let i = 0; i < mask.length; i++) {
+    distance[i] = mask[i] ? 0 : infinity;
+  }
+
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      let index = y * size + x;
+      if (x > 0) distance[index] = Math.min(distance[index], distance[index - 1] + 1);
+      if (y > 0) distance[index] = Math.min(distance[index], distance[index - size] + 1);
+      if (x > 0 && y > 0) {
+        distance[index] = Math.min(distance[index], distance[index - size - 1] + 1.414);
+      }
+      if (x + 1 < size && y > 0) {
+        distance[index] = Math.min(distance[index], distance[index - size + 1] + 1.414);
+      }
+    }
+  }
+
+  for (let y = size - 1; y >= 0; y--) {
+    for (let x = size - 1; x >= 0; x--) {
+      let index = y * size + x;
+      if (x + 1 < size) distance[index] = Math.min(distance[index], distance[index + 1] + 1);
+      if (y + 1 < size) distance[index] = Math.min(distance[index], distance[index + size] + 1);
+      if (x + 1 < size && y + 1 < size) {
+        distance[index] = Math.min(distance[index], distance[index + size + 1] + 1.414);
+      }
+      if (x > 0 && y + 1 < size) {
+        distance[index] = Math.min(distance[index], distance[index + size - 1] + 1.414);
+      }
+    }
+  }
+  return distance;
+}
+
+function scoreReportSpatialLayout(firstMask, secondMask) {
+  let gridSize = 8;
+  let firstGrid = createReportOccupancyGrid(firstMask, gridSize);
+  let secondGrid = createReportOccupancyGrid(secondMask, gridSize);
+  let dot = 0;
+  let firstLength = 0;
+  let secondLength = 0;
+
+  for (let i = 0; i < firstGrid.length; i++) {
+    dot += firstGrid[i] * secondGrid[i];
+    firstLength += firstGrid[i] * firstGrid[i];
+    secondLength += secondGrid[i] * secondGrid[i];
+  }
+  if (firstLength === 0 || secondLength === 0) return 0;
+  return 100 * dot / Math.sqrt(firstLength * secondLength);
+}
+
+function createReportOccupancyGrid(mask, gridSize) {
+  let result = new Float32Array(gridSize * gridSize);
+  let cellSize = REPORT_MASK_SIZE / gridSize;
+  for (let y = 0; y < REPORT_MASK_SIZE; y++) {
+    for (let x = 0; x < REPORT_MASK_SIZE; x++) {
+      if (!mask[y * REPORT_MASK_SIZE + x]) continue;
+      let cellX = Math.min(gridSize - 1, Math.floor(x / cellSize));
+      let cellY = Math.min(gridSize - 1, Math.floor(y / cellSize));
+      result[cellY * gridSize + cellX] += 1;
+    }
+  }
+  return result;
+}
+
+function createReportInteriorMask(mask) {
+  let size = REPORT_MASK_SIZE;
+  let closed = erodeReportMask(dilateReportMask(mask, 2), 2);
+  for (let i = 0; i < mask.length; i++) {
+    if (mask[i]) closed[i] = 1;
+  }
+
+  let outside = new Uint8Array(mask.length);
+  let queue = new Int32Array(mask.length);
+  let head = 0;
+  let tail = 0;
+
+  function addOutside(x, y) {
+    let index = y * size + x;
+    if (closed[index] || outside[index]) return;
+    outside[index] = 1;
+    queue[tail++] = index;
+  }
+
+  for (let x = 0; x < size; x++) {
+    addOutside(x, 0);
+    addOutside(x, size - 1);
+  }
+  for (let y = 0; y < size; y++) {
+    addOutside(0, y);
+    addOutside(size - 1, y);
+  }
+
+  while (head < tail) {
+    let index = queue[head++];
+    let x = index % size;
+    let y = Math.floor(index / size);
+    if (x > 0) addOutside(x - 1, y);
+    if (x + 1 < size) addOutside(x + 1, y);
+    if (y > 0) addOutside(x, y - 1);
+    if (y + 1 < size) addOutside(x, y + 1);
+  }
+
+  let interior = new Uint8Array(mask.length);
+  let count = 0;
+  for (let i = 0; i < mask.length; i++) {
+    if (!closed[i] && !outside[i]) {
+      interior[i] = 1;
+      count++;
+    }
+  }
+  return { mask: interior, count };
+}
+
+function erodeReportMask(mask, radius) {
+  let size = REPORT_MASK_SIZE;
+  let output = new Uint8Array(mask.length);
+  let radiusSquared = radius * radius;
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      let keep = true;
+      for (let oy = -radius; oy <= radius && keep; oy++) {
+        for (let ox = -radius; ox <= radius; ox++) {
+          if (ox * ox + oy * oy > radiusSquared) continue;
+          let targetX = x + ox;
+          let targetY = y + oy;
+          if (
+            targetX < 0 ||
+            targetX >= size ||
+            targetY < 0 ||
+            targetY >= size ||
+            !mask[targetY * size + targetX]
+          ) {
+            keep = false;
+            break;
+          }
+        }
+      }
+      if (keep) output[y * size + x] = 1;
+    }
+  }
+  return output;
+}
+
+function scoreReportBinaryDice(firstMask, secondMask) {
+  let firstCount = 0;
+  let secondCount = 0;
+  let intersection = 0;
+  for (let i = 0; i < firstMask.length; i++) {
+    if (firstMask[i]) firstCount++;
+    if (secondMask[i]) secondCount++;
+    if (firstMask[i] && secondMask[i]) intersection++;
+  }
+  if (firstCount + secondCount === 0) return 0;
+  return 100 * (2 * intersection) / (firstCount + secondCount);
 }
 
 function findBestReportMaskScore(personalMask, collectiveMask) {

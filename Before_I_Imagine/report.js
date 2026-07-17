@@ -141,6 +141,7 @@ function drawAppleReportCard(card, promptNumber, personalDrawing) {
   let prompt = prompts[promptNumber];
   let representative = getReportRepresentativeDrawing(promptNumber);
   let score = getReportSimilarityScore(promptNumber);
+  let hasCloseMatch = hasCloseReportMatch(promptNumber);
   let pad = mobile ? 9 : 14;
   let imageH = mobile ? 56 : constrain(card.h * 0.25, 82, 118);
   let title = ["DEFAULT APPLE", "TOUCH MEMORY", "TASTE MEMORY", "IMPERFECT MEMORY"][promptNumber];
@@ -183,23 +184,27 @@ function drawAppleReportCard(card, promptNumber, personalDrawing) {
   textSize(mobile ? 6 : 7);
   text("Similarity", card.x + card.w / 2, similarityY);
   fill(inkCol);
-  textSize(mobile ? 15 : 21);
-  text(Number.isFinite(score) ? `${round(score)}%` : "--%", card.x + card.w / 2, similarityY + (mobile ? 9 : 12));
+  textSize(hasCloseMatch ? (mobile ? 15 : 21) : (mobile ? 7 : 9));
+  let scoreText = Number.isFinite(score)
+    ? (hasCloseMatch ? `${round(score)}%` : "NO CLOSE MATCH")
+    : "--%";
+  text(scoreText, card.x + card.w / 2, similarityY + (mobile ? 9 : 12));
 
   let collectiveY = similarityY + (mobile ? 32 : 44);
   stroke(190, 182, 171, 85);
   line(card.x + pad, collectiveY - 6, card.x + card.w - pad, collectiveY - 6);
   drawAppleReportImageSlot(
-    representative,
+    hasCloseMatch ? representative : null,
     "Collective Apple",
     card.x + pad,
     collectiveY,
     card.w - pad * 2,
-    imageH
+    imageH,
+    hasCloseMatch ? "image pending" : "no close archive match"
   );
 }
 
-function drawAppleReportImageSlot(drawing, label, x, y, w, h) {
+function drawAppleReportImageSlot(drawing, label, x, y, w, h, emptyLabel = "image pending") {
   let mobile = isMobileScreen();
   noStroke();
   fill(inkCol);
@@ -223,7 +228,7 @@ function drawAppleReportImageSlot(drawing, label, x, y, w, h) {
     fill(132, 124, 115, 120);
     textAlign(CENTER, CENTER);
     textSize(mobile ? 6 : 7.5);
-    text("image pending", x + w / 2, boxY + boxH / 2);
+    text(emptyLabel, x + w / 2, boxY + boxH / 2);
   }
 }
 
@@ -251,7 +256,10 @@ function drawAppleReportSummary(summary, personalDrawings) {
     let rowY = summary.y + 30 + i * (mobile ? 13 : 14);
     text(names[i], summary.x + 14, rowY);
     let score = getReportSimilarityScore(i);
-    text(Number.isFinite(score) ? `${round(score)}%` : "--%", splitX - 34, rowY);
+    let summaryScore = Number.isFinite(score)
+      ? (hasCloseReportMatch(i) ? `${round(score)}%` : "NO MATCH")
+      : "--%";
+    text(summaryScore, splitX - 52, rowY);
   }
 
   let reflection = "";
