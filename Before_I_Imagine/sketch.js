@@ -4523,6 +4523,7 @@ async function saveCurrentDrawing() {
   if (!drawingData.dbId) {
     return false;
   }
+  registerReportPersonalDrawing(drawingData);
 
   return drawingData;
 }

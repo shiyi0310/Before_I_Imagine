@@ -62,7 +62,10 @@ function getAppleReportLayout() {
 
 function drawAppleReportView() {
   let layout = getAppleReportLayout();
-  let personalDrawings = prompts.map((_, index) => getLatestReportDrawing(index));
+  ensureAppleReportSimilarity();
+  let personalDrawings = prompts.map((_, index) => {
+    return getReportPersonalDrawing(index) || getLatestReportDrawing(index);
+  });
 
   noStroke();
   fill(inkCol);
@@ -136,7 +139,7 @@ function drawAppleReportStamp(layout, personalDrawings) {
 function drawAppleReportCard(card, promptNumber, personalDrawing) {
   let mobile = isMobileScreen();
   let prompt = prompts[promptNumber];
-  let representative = getReportCollectiveDrawing(promptNumber, personalDrawing);
+  let representative = getReportRepresentativeDrawing(promptNumber);
   let score = getReportSimilarityScore(promptNumber);
   let pad = mobile ? 9 : 14;
   let imageH = mobile ? 56 : constrain(card.h * 0.25, 82, 118);
@@ -290,16 +293,7 @@ function getLatestReportDrawing(promptNumber) {
 }
 
 function getReportCollectiveDrawing(promptNumber, personalDrawing) {
-  let candidates = archive.filter((drawing) => {
-    return (
-      getDrawingPromptIndex(drawing) === promptNumber &&
-      drawing !== personalDrawing &&
-      drawing.tag !== "outlier" &&
-      hasPreviewData(drawing)
-    );
-  });
-  if (candidates.length === 0) return null;
-  return candidates[floor(candidates.length / 2)];
+  return getReportRepresentativeDrawing(promptNumber);
 }
 
 function formatReportDate(date) {
