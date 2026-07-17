@@ -44,6 +44,39 @@ function registerReportPersonalDrawing(drawing) {
   invalidateAppleReportSimilarity();
 }
 
+function useLatestDrawingsForAppleReport() {
+  let latestByPrompt = [null, null, null, null];
+  for (let i = archive.length - 1; i >= 0; i--) {
+    let drawing = archive[i];
+    let promptIndex = getDrawingPromptIndex(drawing);
+    if (
+      Number.isInteger(promptIndex) &&
+      promptIndex >= 0 &&
+      promptIndex < 4 &&
+      !latestByPrompt[promptIndex]
+    ) {
+      latestByPrompt[promptIndex] = drawing;
+    }
+    if (latestByPrompt.every(Boolean)) break;
+  }
+
+  reportPersonalDrawings = latestByPrompt;
+  invalidateAppleReportSimilarity();
+  ensureAppleReportSimilarity();
+  if (typeof requestRender === "function") {
+    requestRender("report-use-latest-drawings");
+  }
+
+  let result = latestByPrompt.map((drawing, promptIndex) => ({
+    promptIndex,
+    dbId: drawing ? drawing.dbId || null : null,
+    id: drawing ? drawing.id || null : null,
+    createdAt: drawing ? drawing.createdAt || null : null
+  }));
+  console.table(result);
+  return result;
+}
+
 function resetReportSimilarityScores() {
   reportSimilarityScores = [null, null, null, null];
 }
@@ -443,4 +476,8 @@ function removeReportGraphics(graphics) {
 
 function yieldSimilarityWork() {
   return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+if (typeof window !== "undefined") {
+  window.useLatestDrawingsForAppleReport = useLatestDrawingsForAppleReport;
 }
