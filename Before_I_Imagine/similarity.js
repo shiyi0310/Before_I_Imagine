@@ -4,6 +4,7 @@
 const REPORT_MASK_SIZE = 144;
 const REPORT_MASK_PADDING = 16;
 const REPORT_MATCH_RADIUS = 4;
+const REPORT_SESSION_STORAGE_KEY = "beforeIImagineReportDrawingIds";
 
 let reportSimilarityScores = [null, null, null, null];
 let reportPersonalDrawings = [null, null, null, null];
@@ -11,6 +12,7 @@ let reportRepresentativeDrawings = [null, null, null, null];
 let reportSimilarityStatus = "idle";
 let reportSimilarityBuildKey = "";
 let reportSimilarityBuildPromise = null;
+let reportSessionRestored = false;
 
 function getReportSimilarityScore(promptIndex) {
   let score = reportSimilarityScores[promptIndex];
@@ -29,6 +31,7 @@ function getReportSimilarityStatus() {
 }
 
 function getReportPersonalDrawing(promptIndex) {
+  restoreAppleReportSession();
   return reportPersonalDrawings[promptIndex] || null;
 }
 
@@ -40,11 +43,50 @@ function registerReportPersonalDrawing(drawing) {
   if (!drawing) return;
   let promptIndex = getDrawingPromptIndex(drawing);
   if (!Number.isInteger(promptIndex) || promptIndex < 0 || promptIndex >= 4) return;
+  if (promptIndex === 0) {
+    reportPersonalDrawings = [null, null, null, null];
+  }
   reportPersonalDrawings[promptIndex] = drawing;
+  reportSessionRestored = true;
+  persistAppleReportSession();
   invalidateAppleReportSimilarity();
 }
 
-function useLatestDrawingsForAppleReport() {
+function persistAppleReportSession() {
+  if (typeof sessionStorage === "undefined") return;
+  let drawingIds = reportPersonalDrawings.map((drawing) => {
+    return drawing && drawing.dbId ? String(drawing.dbId) : null;
+  });
+  try {
+    sessionStorage.setItem(REPORT_SESSION_STORAGE_KEY, JSON.stringify(drawingIds));
+  } catch (error) {
+    console.warn("Could not save Apple Report session:", error);
+  }
+}
+
+function restoreAppleReportSession() {
+  if (reportSessionRestored || typeof sessionStorage === "undefined") return;
+  if (!Array.isArray(archive) || archive.length === 0) return;
+
+  reportSessionRestored = true;
+  try {
+    let savedIds = JSON.parse(
+      sessionStorage.getItem(REPORT_SESSION_STORAGE_KEY) || "[]"
+    );
+    if (!Array.isArray(savedIds)) return;
+    reportPersonalDrawings = [0, 1, 2, 3].map((promptIndex) => {
+      let dbId = savedIds[promptIndex];
+      if (!dbId) return null;
+      return archive.find((drawing) => {
+        return drawing && String(drawing.dbId || "") === String(dbId);
+      }) || null;
+    });
+  } catch (error) {
+    console.warn("Could not restore Apple Report session:", error);
+  }
+}
+
+async function useLatestDrawingsForAppleReport() {
   let latestByPrompt = [null, null, null, null];
   for (let i = archive.length - 1; i >= 0; i--) {
     let drawing = archive[i];
@@ -61,8 +103,10 @@ function useLatestDrawingsForAppleReport() {
   }
 
   reportPersonalDrawings = latestByPrompt;
+  reportSessionRestored = true;
+  persistAppleReportSession();
   invalidateAppleReportSimilarity();
-  ensureAppleReportSimilarity();
+  await ensureAppleReportSimilarity();
   if (typeof requestRender === "function") {
     requestRender("report-use-latest-drawings");
   }
@@ -101,6 +145,7 @@ function getAppleReportBuildKey() {
 }
 
 function ensureAppleReportSimilarity() {
+  restoreAppleReportSession();
   let buildKey = getAppleReportBuildKey();
   if (reportSimilarityStatus === "ready" && reportSimilarityBuildKey === buildKey) {
     return Promise.resolve();
@@ -164,8 +209,19 @@ async function buildAppleReportSimilarity(buildKey) {
       if (maskData) candidates.push({ drawing, ...maskData });
     }
 
-    let collective = buildReportCollectiveMask(candidates);
     let personalDrawing = reportPersonalDrawings[promptIndex];
+    if (personalDrawing && !Array.isArray(personalDrawing.actions)) {
+      let personalKey = getReportDrawingKey(personalDrawing);
+      let loadedPersonal = loadedDrawings.find((drawing) => {
+        return getReportDrawingKey(drawing) === personalKey;
+      });
+      if (loadedPersonal) {
+        personalDrawing = loadedPersonal;
+        reportPersonalDrawings[promptIndex] = loadedPersonal;
+      }
+    }
+
+    let collective = buildReportCollectiveMask(candidates);
     let personalMask = personalDrawing ? createReportDrawingMask(personalDrawing) : null;
     if (personalMask && candidates.length > 0) {
       let closestMatch = findClosestReportDrawing(personalMask.mask, candidates);
