@@ -132,16 +132,17 @@ async function buildAppleReportSimilarity(buildKey) {
     }
 
     let collective = buildReportCollectiveMask(candidates);
-    if (collective) {
-      reportRepresentativeDrawings[promptIndex] = findReportRepresentative(candidates, collective.mask);
-      let personalDrawing = reportPersonalDrawings[promptIndex];
-      let personalMask = personalDrawing ? createReportDrawingMask(personalDrawing) : null;
-      if (personalMask) {
-        setReportSimilarityScore(
-          promptIndex,
-          findBestReportMaskScore(personalMask.mask, collective.mask)
-        );
-      }
+    let personalDrawing = reportPersonalDrawings[promptIndex];
+    let personalMask = personalDrawing ? createReportDrawingMask(personalDrawing) : null;
+    if (personalMask && candidates.length > 0) {
+      let closestMatch = findClosestReportDrawing(personalMask.mask, candidates);
+      reportRepresentativeDrawings[promptIndex] = closestMatch.drawing;
+      setReportSimilarityScore(promptIndex, closestMatch.score);
+    } else if (collective) {
+      reportRepresentativeDrawings[promptIndex] = findReportRepresentative(
+        candidates,
+        collective.mask
+      );
     }
     await yieldSimilarityWork();
   }
@@ -292,6 +293,41 @@ function findReportRepresentative(candidates, collectiveMask) {
     }
   }
   return bestDrawing;
+}
+
+function findClosestReportDrawing(personalMask, candidates) {
+  let dilatedPersonal = dilateReportMask(personalMask, REPORT_MATCH_RADIUS);
+  let ranked = candidates.map((candidate) => {
+    let candidateDilated = dilateReportMask(candidate.mask, REPORT_MATCH_RADIUS);
+    return {
+      candidate,
+      score: scoreReportMasks(
+        personalMask,
+        candidate.mask,
+        REPORT_MATCH_RADIUS,
+        dilatedPersonal,
+        candidateDilated
+      )
+    };
+  }).sort((a, b) => b.score - a.score);
+
+  // Normalization already handles most alignment. Apply the more expensive
+  // transform search only to the strongest coarse candidates.
+  let finalists = ranked.slice(0, Math.min(6, ranked.length));
+  let best = { drawing: null, score: 0 };
+  for (let finalist of finalists) {
+    let refinedScore = findBestReportMaskScore(
+      personalMask,
+      finalist.candidate.mask
+    );
+    if (refinedScore > best.score) {
+      best = {
+        drawing: finalist.candidate.drawing,
+        score: refinedScore
+      };
+    }
+  }
+  return best;
 }
 
 function findBestReportMaskScore(personalMask, collectiveMask) {
