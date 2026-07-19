@@ -1847,28 +1847,69 @@ function drawAverageAppleView() {
     return;
   }
 
-  if (cache.status === "error" || cache.count === 0) {
+  let visibleDrawingCount = averageViewMode === "all"
+    ? cache.previewItems.length
+    : cache.count;
+  if (cache.status === "error" || visibleDrawingCount === 0) {
     noStroke();
     fill(mutedCol);
     textAlign(CENTER, CENTER);
     textSize(isMobileScreen() ? 11 : 12);
-    text(cache.status === "error" ? "Could not build this trace." : "No valid brush traces in this prompt.", panel.x + panel.w / 2, panel.y + panel.h / 2);
+    let emptyMessage = averageViewMode === "all"
+      ? "No drawing images in this prompt."
+      : "No valid brush traces in this prompt.";
+    text(cache.status === "error" ? "Could not build this trace." : emptyMessage, panel.x + panel.w / 2, panel.y + panel.h / 2);
     return;
   }
 
-  let buffer = averageViewMode === "all"
-    ? cache.all
-    : averageViewMode === "average"
-      ? cache.average
-      : cache.common;
-  if (buffer) image(buffer, panel.x, panel.y, panel.w, panel.h);
+  if (averageViewMode === "all") {
+    drawAverageAllDrawingsComposite(cache, panel);
+  } else {
+    let buffer = averageViewMode === "average" ? cache.average : cache.common;
+    if (buffer) image(buffer, panel.x, panel.y, panel.w, panel.h);
+  }
 
   noStroke();
   fill(82, 75, 68, 170);
   textAlign(CENTER, CENTER);
   textSize(isMobileScreen() ? 9 : 10);
   let promptName = ["DEFAULT", "TOUCH MEMORY", "TASTE MEMORY", "IMPERFECT MEMORY"][averagePromptIndex];
-  text(`${promptName}  ·  ${cache.count} valid drawings`, panel.x + panel.w / 2, panel.y + panel.h + 18);
+  text(`${promptName}  ·  ${visibleDrawingCount} valid drawings`, panel.x + panel.w / 2, panel.y + panel.h + 18);
+}
+
+function drawAverageAllDrawingsComposite(cache, panel) {
+  let items = cache.previewItems || [];
+  let imageSize = min(panel.w, panel.h) * 0.84;
+  let imageAlpha = constrain(34 - items.length * 0.08, 20, 34);
+  let centerX = panel.x + panel.w / 2;
+  let centerY = panel.y + panel.h / 2;
+
+  for (let layer = 2; layer >= 0; layer--) {
+    let offset = (layer + 1) * 4;
+    noFill();
+    stroke(255, 255, 255, 45 + layer * 10);
+    strokeWeight(1);
+    rect(panel.x + offset, panel.y - offset, panel.w, panel.h, 9);
+  }
+
+  for (let item of items) {
+    let drawing = archive[item.archiveIndex];
+    if (!drawing) continue;
+    if (!item.cachedThumb) item.cachedThumb = getPreviewImage(drawing);
+    if (!item.cachedThumb) continue;
+
+    let seed = item.archiveIndex + 1;
+    let offsetX = sin(seed * 2.17) * min(12, panel.w * 0.025);
+    let offsetY = cos(seed * 1.63) * min(10, panel.h * 0.02);
+    let rotation = sin(seed * 0.91) * 0.02;
+    push();
+    translate(centerX + offsetX, centerY + offsetY);
+    rotate(rotation);
+    tint(255, imageAlpha);
+    drawImageContained(item.cachedThumb, -imageSize / 2, -imageSize / 2, imageSize, imageSize);
+    noTint();
+    pop();
+  }
 }
 
 function drawAverageControlTabs(tabs, activeValue) {
@@ -1943,6 +1984,9 @@ function ensureAveragePromptCache(promptIndex) {
     total: indices.length,
     loaded: 0,
     count: 0,
+    previewItems: indices
+      .filter((index) => hasPreviewData(archive[index]))
+      .map((index) => ({ archiveIndex: index, cachedThumb: null })),
     all: null,
     common: null,
     average: null,
