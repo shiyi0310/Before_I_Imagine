@@ -168,10 +168,6 @@ let gridMiniCache = {};
 let previewImageCache = {};
 let imageURLCache = {};
 let archivePan = { x: 0, y: 0 };
-let archiveSlicePanX = 0;
-let archiveSliceDragging = false;
-let archiveSliceLastX = 0;
-let slicePromptIndex = 0;
 let averagePromptIndex = 0;
 let averageViewMode = "common";
 let averageAppleCache = [null, null, null, null];
@@ -303,7 +299,7 @@ function renderNeedsContinuousLoop() {
   if (abs(archiveTransition - archiveTargetTransition) > 0.01) return true;
   if (page === "draw" && !modalOpen && backgroundViewMode === "wall") return true;
   if (page === "archiveWall" || page === "layer") return true;
-  if (archiveRowDragging || archiveSliceDragging || isWallPanning || isArchivePanning) return true;
+  if (archiveRowDragging || isWallPanning || isArchivePanning) return true;
   for (let v of archiveRowVelocity) {
     if (abs(v || 0) > 0.02) return true;
   }
@@ -1062,7 +1058,7 @@ function drawImmersiveDrawingPage() {
     drawToolbarPanel();
     drawDrawingModalClose();
     drawDrawingFooter();
-  } else if (backgroundViewMode !== "slice" && backgroundViewMode !== "average" && backgroundViewMode !== "report") {
+  } else if (backgroundViewMode !== "average" && backgroundViewMode !== "report") {
     drawReopenDrawingButton();
   }
 
@@ -1167,7 +1163,7 @@ function drawDrawingModalShadow() {
 }
 
 function getBackgroundViewSwitcherRect() {
-  let w = isMobileScreen() ? min(width - 24, 360) : min(690, width - getDrawSidebarWidth() - 36);
+  let w = isMobileScreen() ? min(width - 24, 360) : min(590, width - getDrawSidebarWidth() - 36);
   let h = isMobileScreen() ? 40 : 52;
   let x = isMobileScreen() ? (width - w) / 2 : getDrawSidebarWidth() + (width - getDrawSidebarWidth() - w) / 2;
   let y = isMobileScreen() ? 20 : 28;
@@ -1222,7 +1218,6 @@ function getTopToolbarOptions(r) {
     { mode: "draw", label: "DRAW", w: 62 },
     { mode: "archive", label: "ARCHIVE", w: 82 },
     { mode: "wall", label: "WALL", w: 62 },
-    { mode: "slice", label: "SLICE", w: 62 },
     { mode: "average", label: "AVERAGE APPLE", w: 112 },
     { mode: "report", label: "REPORT", w: 72 }
   ];
@@ -1259,7 +1254,7 @@ function getModalCloseRect() {
 }
 
 function drawReopenDrawingButton() {
-  if (backgroundViewMode === "slice" || backgroundViewMode === "average" || backgroundViewMode === "report") return;
+  if (backgroundViewMode === "average" || backgroundViewMode === "report") return;
 
   let r = getReopenDrawingButtonRect();
 
@@ -1306,23 +1301,29 @@ function drawDrawPageSidebar() {
   textAlign(LEFT);
   textSize(isCompactDesktop() ? 12 : 14);
   drawingContext.letterSpacing = "2px";
-  text("BEFORE I IMAGINE", pad, 42, innerW);
+  let brandY = 42;
+  let brandLineH = isCompactDesktop() ? 18 : 20;
+  text("BEFORE I", pad, brandY);
+  text("IMAGINE", pad, brandY + brandLineH);
   drawingContext.letterSpacing = "0px";
 
   fill(mutedCol);
   textSize(isCompactDesktop() ? 9.5 : 10);
-  text("A sensory drawing experiment", pad, 66, innerW);
+  let subtitleY = brandY + brandLineH * 2 + 10;
+  let subtitleLineH = 15;
+  text("A sensory drawing", pad, subtitleY);
+  text("experiment", pad, subtitleY + subtitleLineH);
 
   fill(inkCol);
   textSize(11);
-  text("•  ARCHIVE", pad, 132, innerW);
+  text("•  ARCHIVE", pad, 142, innerW);
   textSize(isCompactDesktop() ? 24 : 28);
-  text(String(archive.length), pad, 176, innerW);
+  text(String(archive.length), pad, 182, innerW);
   fill(mutedCol);
   textSize(11);
-  text("Apples collected", pad, 198, innerW);
+  text("Apples collected", pad, 204, innerW);
 
-  drawSidebarSparkline(pad, 236, innerW, 24);
+  drawSidebarSparkline(pad, 242, innerW, 24);
 
   let archivePageOpen = page === "draw" && !modalOpen && backgroundViewMode === "archive";
   if (!archivePageOpen) {
@@ -1436,11 +1437,6 @@ function generateDrawBackgroundApplesLayout() {
   let rowSeen = [0, 0, 0, 0];
   let protectedZones = getDrawBackgroundProtectedZones();
 
-  if (backgroundViewMode === "slice") {
-    cardW = mobile ? 88 : 128;
-    cardH = mobile ? 94 : 142;
-  }
-
   for (let i = 0; i < recent.length; i++) {
     let colBias = i % 4;
     let x;
@@ -1530,11 +1526,6 @@ function drawFloatingArchiveApples() {
 
   let mobile = isMobileScreen();
 
-  if (backgroundViewMode === "slice") {
-    drawSlicePromptComposite();
-    return;
-  }
-
   if (backgroundViewMode === "archive") {
     updateArchiveFilmReplay();
   }
@@ -1576,8 +1567,6 @@ function drawFloatingArchiveApples() {
 
     if (isArchiveMode) {
       drawArchiveTarotCard(d, item, drawSize, cardH, hovered);
-    } else if (backgroundViewMode === "slice") {
-      drawFloatingSliceCard(d, item);
     } else {
       drawFloatingWallCard(d, item);
     }
@@ -1616,115 +1605,6 @@ function getArchiveFilmDrawOffsets(item) {
     offsets.push(k * cycleW);
   }
   return offsets;
-}
-
-function getSlicePromptTabs() {
-  let sidebarW = isMobileScreen() ? 0 : getDrawSidebarWidth();
-  let labels = ["DEFAULT", "TOUCH", "TASTE", "IMPERFECT"];
-  let gap = 7;
-  let tabW = isMobileScreen() ? 68 : 88;
-  let tabH = 28;
-  let totalW = labels.length * tabW + (labels.length - 1) * gap;
-  let centerX = sidebarW + (width - sidebarW) / 2;
-  let startX = centerX - totalW / 2;
-  let y = isMobileScreen() ? 78 : 104;
-
-  return labels.map((label, index) => ({
-    index: index,
-    label: label,
-    x: startX + index * (tabW + gap),
-    y: y,
-    w: tabW,
-    h: tabH
-  }));
-}
-
-function getSlicePromptTabAt(x, y) {
-  if (modalOpen || backgroundViewMode !== "slice") return -1;
-  for (let tab of getSlicePromptTabs()) {
-    if (pointInsideRect(x, y, tab)) return tab.index;
-  }
-  return -1;
-}
-
-function drawSlicePromptComposite() {
-  let sidebarW = isMobileScreen() ? 0 : getDrawSidebarWidth();
-  let contentX = sidebarW;
-  let contentW = width - sidebarW;
-  let tabs = getSlicePromptTabs();
-  let selectedItems = drawBackgroundApplesLayout.filter((item) => {
-    let d = archive[item.archiveIndex];
-    return d && getDrawingPromptIndex(d) === slicePromptIndex;
-  });
-
-  for (let tab of tabs) {
-    let active = tab.index === slicePromptIndex;
-    noStroke();
-    fill(active ? 43 : 251, active ? 40 : 249, active ? 36 : 244, active ? 225 : 205);
-    rect(tab.x, tab.y, tab.w, tab.h, 14);
-    if (!active) {
-      noFill();
-      stroke(166, 157, 145, 125);
-      strokeWeight(1);
-      rect(tab.x + 0.5, tab.y + 0.5, tab.w - 1, tab.h - 1, 14);
-    }
-    noStroke();
-    fill(active ? 250 : 92, active ? 248 : 85, active ? 244 : 77);
-    textAlign(CENTER, CENTER);
-    textSize(isMobileScreen() ? 8.5 : 9.5);
-    text(tab.label, tab.x + tab.w / 2, tab.y + tab.h / 2 + 0.5);
-  }
-
-  let promptLabels = ["TASK 01 / DEFAULT", "TASK 02 / TOUCH MEMORY", "TASK 03 / TASTE MEMORY", "TASK 04 / IMPERFECT MEMORY"];
-  let labelY = tabs[0].y + tabs[0].h + 24;
-  noStroke();
-  fill(62, 57, 52, 205);
-  textAlign(CENTER, CENTER);
-  textSize(isMobileScreen() ? 11 : 12);
-  text(`${promptLabels[slicePromptIndex]}  ·  ${selectedItems.length} drawings`, contentX + contentW / 2, labelY);
-
-  let availableH = max(220, height - labelY - 62);
-  let cardW = min(isMobileScreen() ? width - 48 : 390, contentW * (isMobileScreen() ? 0.82 : 0.38));
-  let cardH = min(isMobileScreen() ? 420 : 500, availableH * 0.84);
-  let centerX = contentX + contentW / 2;
-  let centerY = labelY + 24 + availableH / 2;
-
-  drawingContext.save();
-  drawingContext.shadowColor = "rgba(54, 44, 32, 0.13)";
-  drawingContext.shadowBlur = 28;
-  drawingContext.shadowOffsetY = 15;
-  noStroke();
-  fill(252, 249, 241, 118);
-  rect(centerX - cardW / 2, centerY - cardH / 2, cardW, cardH, 10);
-  drawingContext.restore();
-
-  for (let layer = 2; layer >= 0; layer--) {
-    let offset = (layer + 1) * 5;
-    noFill();
-    stroke(255, 255, 255, 55 + layer * 12);
-    strokeWeight(1);
-    rect(centerX - cardW / 2 + offset, centerY - cardH / 2 - offset, cardW, cardH, 10);
-  }
-
-  let imageSize = min(cardW * 0.78, cardH * 0.7);
-  let imageAlpha = constrain(34 - selectedItems.length * 0.08, 20, 34);
-  for (let i = 0; i < selectedItems.length; i++) {
-    let item = selectedItems[i];
-    let d = archive[item.archiveIndex];
-    if (!item.cachedThumb) item.cachedThumb = getPreviewImage(d);
-    if (!item.cachedThumb) continue;
-
-    let offsetX = sin((item.archiveIndex + 1) * 2.17) * min(12, cardW * 0.035);
-    let offsetY = cos((item.archiveIndex + 1) * 1.63) * min(10, cardH * 0.025);
-    let rotation = sin((item.archiveIndex + 1) * 0.91) * 0.025;
-    push();
-    translate(centerX + offsetX, centerY + offsetY);
-    rotate(rotation);
-    tint(255, imageAlpha);
-    drawImageContained(item.cachedThumb, -imageSize / 2, -imageSize / 2, imageSize, imageSize);
-    noTint();
-    pop();
-  }
 }
 
 function getAverageAppleLayout() {
@@ -1836,7 +1716,13 @@ function drawAverageAppleView() {
   strokeWeight(1);
   rect(panel.x + 0.5, panel.y + 0.5, panel.w - 1, panel.h - 1, 9);
 
-  if (!cache || cache.status === "loading") {
+  let canDrawPreviewComposite = Boolean(
+    cache &&
+    averageViewMode === "all" &&
+    cache.previewItems &&
+    cache.previewItems.length > 0
+  );
+  if ((!cache || cache.status === "loading") && !canDrawPreviewComposite) {
     let loaded = cache ? cache.loaded : 0;
     let total = cache ? cache.total : 0;
     noStroke();
@@ -1850,7 +1736,7 @@ function drawAverageAppleView() {
   let visibleDrawingCount = averageViewMode === "all"
     ? cache.previewItems.length
     : cache.count;
-  if (cache.status === "error" || visibleDrawingCount === 0) {
+  if ((cache.status === "error" && averageViewMode !== "all") || visibleDrawingCount === 0) {
     noStroke();
     fill(mutedCol);
     textAlign(CENTER, CENTER);
@@ -2319,31 +2205,6 @@ function drawFloatingWallCard(d, item) {
 }
 
 
-function drawFloatingSliceCard(d, item) {
-  let w = item.cardW;
-  let h = item.cardH;
-
-  noStroke();
-  fill(255, 253, 248, 86);
-  rect(-w / 2, -h / 2, w, h, 8);
-
-  stroke(255, 255, 255, 78);
-  strokeWeight(1);
-  noFill();
-  rect(-w / 2 + 0.5, -h / 2 + 0.5, w - 1, h - 1, 8);
-
-  push();
-  translate(-item.size / 2, -item.size / 2);
-  if (item.cachedThumb) {
-    tint(255, 255 * item.alpha);
-    drawImageContained(item.cachedThumb, 0, 0, item.size, item.size);
-    noTint();
-  } else {
-    drawMissingImagePlaceholder(item.size, item.size);
-  }
-  pop();
-}
-
 function drawArchiveTarotCard(d, item, cardW, cardH, hovered) {
   let isOutlier = d && d.tag === "outlier";
   let active = isArchiveFilmItemReplaying(item);
@@ -2515,13 +2376,13 @@ function getArchiveFilmMetrics() {
   let cardW = mobile ? 96 : 112;
   let cardH = mobile ? 128 : 96;
   let gap = mobile ? 10 : 12;
-  let promptInfoW = mobile ? 0 : 236;
+  let promptInfoW = 0;
   return {
     cardW: cardW,
     cardH: cardH,
     gap: gap,
     stepX: cardW + gap,
-    startX: sidebarW + (mobile ? 78 : 58 + promptInfoW),
+    startX: sidebarW + (mobile ? 78 : 58 + cardW / 2),
     promptInfoW: promptInfoW
   };
 }
@@ -2953,20 +2814,7 @@ function drawMemoryArchiveView() {
   let rowY = getArchiveRowsTop();
   let metrics = getArchiveFilmMetrics();
   for (let i = 0; i < 4; i++) {
-    let info = getArchiveRowInfo(i);
     let y = rowY + i * getArchiveRowGap();
-    noStroke();
-    fill(26, 26, 26, 150);
-    textAlign(LEFT);
-    textSize(10);
-    text(info.task, x0, y - 4);
-    fill(26, 26, 26, 232);
-    textSize(isCompactDesktop() ? 18 : 21);
-    text(info.title, x0, y + 14, metrics.promptInfoW - 18);
-    fill(26, 26, 26, 166);
-    textSize(isCompactDesktop() ? 11 : 12);
-    text(info.desc, x0, y + 44, metrics.promptInfoW - 24);
-
     stroke(214, 205, 193, 115);
     strokeWeight(1);
     line(metrics.startX - metrics.cardW / 2, y + 18, width - 50, y + 18);
@@ -3609,7 +3457,7 @@ function touchMoved() {
       return true;
     }
 
-    if (archiveSliceDragging || archiveRowDragging || isWallPanning || isArchivePanning || (page === "draw" && pointInsideDrawingArea(x, y))) {
+    if (archiveRowDragging || isWallPanning || isArchivePanning || (page === "draw" && pointInsideDrawingArea(x, y))) {
       handlePointerDragged(x, y);
       return false;
     }
@@ -3659,12 +3507,6 @@ function handlePointerPressed(x, y) {
     return true;
   }
 
-  if (canPanArchiveSliceAt(x, y)) {
-    archiveSliceDragging = true;
-    archiveSliceLastX = x;
-    return true;
-  }
-
   if (page === "draw" && pointInsideUndoButton(x, y)) {
     handleUndoClick();
     return true;
@@ -3704,13 +3546,6 @@ function handlePointerDragged(x, y) {
   }
 
   if (page === "draw" && pointInsideUndoButton(x, y)) {
-    return false;
-  }
-
-  if (archiveSliceDragging) {
-    archiveSlicePanX += x - archiveSliceLastX;
-    archiveSliceLastX = x;
-    constrainArchiveSlicePan();
     return false;
   }
 
@@ -3783,10 +3618,6 @@ function handlePointerReleased() {
   if (reflectionModalOpen) {
     currentAction = null;
     return;
-  }
-
-  if (archiveSliceDragging) {
-    archiveSliceDragging = false;
   }
 
   if (archiveRowDragging) {
@@ -3941,7 +3772,7 @@ function handleDrawPageClick(x, y) {
       } else {
         clearArchiveIdleTimer();
       }
-      if (switchMode === "wall" || switchMode === "slice") {
+      if (switchMode === "wall") {
         generateDrawBackgroundApplesLayout();
       }
       if (switchMode === "average") {
@@ -3963,13 +3794,6 @@ function handleDrawPageClick(x, y) {
     return true;
   }
 
-  let sliceTabIndex = getSlicePromptTabAt(x, y);
-  if (sliceTabIndex >= 0) {
-    slicePromptIndex = sliceTabIndex;
-    requestRender("slice-tab");
-    return true;
-  }
-
   if (modalOpen && isClickOnModalClose(x, y)) {
     modalOpen = false;
     currentAction = null;
@@ -3982,7 +3806,6 @@ function handleDrawPageClick(x, y) {
 
   if (
     !modalOpen &&
-    backgroundViewMode !== "slice" &&
     backgroundViewMode !== "average" &&
     backgroundViewMode !== "report" &&
     isClickOnReopenDrawingButton(x, y)
@@ -3999,14 +3822,6 @@ function handleDrawPageClick(x, y) {
   }
 
   return false;
-}
-
-function isArchiveSliceMode() {
-  return (
-    page === "draw" &&
-    !modalOpen &&
-    backgroundViewMode === "slice"
-  );
 }
 
 function isMobileArchiveMode() {
@@ -4062,10 +3877,6 @@ function constrainMobileArchivePan() {
   let minY = min(0, height - contentH - 40);
   archivePan.y = constrain(archivePan.y, minY, 0);
   archivePan.x = 0;
-}
-
-function canPanArchiveSliceAt(x, y) {
-  return false;
 }
 
 function getArchiveRowAt(x, y) {
@@ -4167,18 +3978,6 @@ function updateArchiveRowInertia() {
   }
 }
 
-function constrainArchiveSlicePan() {
-  let sidebarW = isMobileScreen() ? 0 : getDrawSidebarWidth();
-  let count = backgroundViewMode === "archive"
-    ? min(archive.length, 10)
-    : drawBackgroundApplesLayout.length;
-  let contentW = max(width, count * (backgroundViewMode === "archive" ? 112 : 92));
-  let minX = min(0, width - sidebarW - contentW - 80);
-  let maxX = max(80, (width - sidebarW) * 0.2);
-
-  archiveSlicePanX = constrain(archiveSlicePanX, minX, maxX);
-}
-
 let lastBackgroundToggleTime = 0;
 
 function toggleBackgroundLayout() {
@@ -4268,10 +4067,6 @@ function mouseWheel(event) {
     zoomWallCameraAt(mouseX, mouseY, zoomFactor);
     requestRender("wall-wheel");
     return false;
-  }
-
-  if (isArchiveSliceMode()) {
-    return true;
   }
 
   if (page === "draw" && !modalOpen && backgroundViewMode === "archive") {
