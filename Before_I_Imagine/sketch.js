@@ -181,6 +181,9 @@ let isWallPanning = false;
 let lastWallPanPoint = { x: 0, y: 0 };
 let wallPressPoint = { x: 0, y: 0 };
 let wallDragDistance = 0;
+let wallTouchGestureActive = false;
+let wallTouchLastCenter = { x: 0, y: 0 };
+let wallTouchLastDistance = 0;
 let wallFieldLayout = [];
 let wallWorldBounds = { x: 0, y: 0, w: 1, h: 1 };
 let wallCameraInitialized = false;
@@ -2602,7 +2605,7 @@ function drawWallFieldControls() {
     textAlign(LEFT, TOP);
     textSize(9.5);
     text(
-      "Drag to explore\nScroll or pinch to zoom\nClick an apple to view its record",
+      "Two-finger swipe to explore\nPinch to zoom\nClick an apple to view its record",
       boxX + 10,
       boxY + 10,
       boxW - 20,
@@ -2805,6 +2808,59 @@ function handleTopWallPress(x, y) {
   wallPressPoint = { x: x, y: y };
   wallDragDistance = 0;
   return true;
+}
+
+function beginWallTouchGesture() {
+  if (touches.length < 2) return;
+  let a = touches[0];
+  let b = touches[1];
+  wallTouchGestureActive = true;
+  isWallPanning = false;
+  wallTouchLastCenter = {
+    x: (a.x + b.x) / 2,
+    y: (a.y + b.y) / 2
+  };
+  wallTouchLastDistance = dist(a.x, a.y, b.x, b.y);
+}
+
+function updateWallTouchGesture() {
+  if (touches.length < 2) return;
+  let a = touches[0];
+  let b = touches[1];
+  let center = {
+    x: (a.x + b.x) / 2,
+    y: (a.y + b.y) / 2
+  };
+  let distance = max(1, dist(a.x, a.y, b.x, b.y));
+
+  if (!wallTouchGestureActive) {
+    beginWallTouchGesture();
+    return;
+  }
+
+  wallCamera.x += (center.x - wallTouchLastCenter.x) / wallCamera.zoom;
+  wallCamera.y += (center.y - wallTouchLastCenter.y) / wallCamera.zoom;
+
+  if (wallTouchLastDistance > 0) {
+    zoomTopWallCameraAt(
+      center.x,
+      center.y,
+      constrain(distance / wallTouchLastDistance, 0.82, 1.22)
+    );
+  }
+
+  wallTouchLastCenter = center;
+  wallTouchLastDistance = distance;
+  wallCameraInitialized = true;
+  constrainTopWallCamera();
+  requestRender("wall-touch-gesture");
+}
+
+function endWallTouchGesture() {
+  wallTouchGestureActive = false;
+  wallTouchLastDistance = 0;
+  isWallPanning = false;
+  requestRender("wall-touch-end");
 }
 
 
@@ -4006,6 +4062,11 @@ function touchStarted() {
     return true;
   }
 
+  if (isTopWallMode() && touches.length >= 2) {
+    beginWallTouchGesture();
+    return false;
+  }
+
   if (touches.length > 0) {
     let x = touches[0].x;
     let y = touches[0].y;
@@ -4052,6 +4113,16 @@ function touchMoved() {
     return true;
   }
 
+  if (isTopWallMode() && touches.length >= 2) {
+    updateWallTouchGesture();
+    return false;
+  }
+
+  if (wallTouchGestureActive) {
+    endWallTouchGesture();
+    return false;
+  }
+
   if (touches.length > 0) {
     let x = touches[0].x;
     let y = touches[0].y;
@@ -4073,6 +4144,11 @@ function touchEnded() {
   requestRender("touch-ended");
   if (reflectionModalOpen) {
     return true;
+  }
+
+  if (wallTouchGestureActive) {
+    endWallTouchGesture();
+    return false;
   }
 
   handlePointerReleased();
@@ -4169,7 +4245,15 @@ function handlePointerDragged(x, y) {
     return false;
   }
 
-  if (isWallPanning && (page === "archiveWall" || isTopWallMode())) {
+  if (isWallPanning && isTopWallMode()) {
+    let dx = x - lastWallPanPoint.x;
+    let dy = y - lastWallPanPoint.y;
+    wallDragDistance += abs(dx) + abs(dy);
+    lastWallPanPoint = { x: x, y: y };
+    return false;
+  }
+
+  if (isWallPanning && page === "archiveWall") {
     let dx = x - lastWallPanPoint.x;
     let dy = y - lastWallPanPoint.y;
     wallCamera.x += dx / wallCamera.zoom;
@@ -4709,9 +4793,20 @@ function mouseWheel(event) {
   if (isTopWallMode()) {
     let frame = getWallFieldViewport();
     if (pointInsideRect(mouseX, mouseY, frame) && !isClickOnViewSwitcher(mouseX, mouseY)) {
-      let zoomFactor = exp(-event.delta * 0.0016);
-      zoomTopWallCameraAt(mouseX, mouseY, zoomFactor);
-      requestRender("wall-wheel");
+      if (event.ctrlKey) {
+        let pinchDelta = event.deltaY !== undefined ? event.deltaY : event.delta;
+        let zoomFactor = exp(-pinchDelta * 0.01);
+        zoomTopWallCameraAt(mouseX, mouseY, zoomFactor);
+        requestRender("wall-pinch");
+      } else {
+        let dx = Number(event.deltaX) || 0;
+        let dy = Number(event.deltaY !== undefined ? event.deltaY : event.delta) || 0;
+        wallCamera.x -= dx / wallCamera.zoom;
+        wallCamera.y -= dy / wallCamera.zoom;
+        wallCameraInitialized = true;
+        constrainTopWallCamera();
+        requestRender("wall-two-finger-pan");
+      }
       return false;
     }
   }
