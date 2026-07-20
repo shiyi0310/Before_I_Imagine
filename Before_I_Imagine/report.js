@@ -1,6 +1,9 @@
 // Apple Report UI.
 // Similarity calculation and print output are intentionally kept separate.
 
+let reportPrintState = "idle";
+let reportPrintResetTimer = null;
+
 function getAppleReportLayout() {
   let mobile = isMobileScreen();
   let sidebarW = mobile ? 0 : getDrawSidebarWidth();
@@ -283,14 +286,20 @@ function drawAppleReportSummary(summary, personalDrawings) {
 function drawAppleReportPrintButton(button) {
   let mobile = isMobileScreen();
   noStroke();
-  fill(28, 27, 25);
+  fill(reportPrintState === "failed" ? 110 : 28, 27, 25);
   let innerH = mobile ? button.h : min(44, button.h - 24);
   let y = mobile ? button.y : button.y + (button.h - innerH) / 2;
   rect(button.x, y, button.w, innerH, 5);
   fill(251, 250, 246);
   textAlign(CENTER, CENTER);
   textSize(mobile ? 7.5 : 9);
-  text("PRINT RECEIPT", button.x + button.w / 2, y + innerH / 2);
+  let label = {
+    idle: "PRINT RECEIPT",
+    printing: "PRINTING...",
+    printed: "PRINTED",
+    failed: "PRINT FAILED"
+  }[reportPrintState] || "PRINT RECEIPT";
+  text(label, button.x + button.w / 2, y + innerH / 2);
 }
 
 function getLatestReportDrawing(promptNumber) {
@@ -315,8 +324,91 @@ function handleAppleReportClick(x, y) {
   if (modalOpen || backgroundViewMode !== "report") return false;
   let layout = getAppleReportLayout();
   if (pointInsideRect(x, y, layout.printButton)) {
-    console.info("Apple Report print UI is ready; print output will be connected in the next phase.");
+    if (reportPrintState !== "printing") {
+      printCurrentAppleReport();
+    }
     return true;
   }
   return false;
+}
+
+async function printCurrentAppleReport() {
+  if (reportPrintState === "printing") return;
+  clearTimeout(reportPrintResetTimer);
+  reportPrintState = "printing";
+  requestRender("report-printing");
+
+  try {
+    let payload = buildAppleReportPrintPayload();
+    let response = await fetch("http://localhost:3001/print-report", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    let result = await response.json().catch(() => null);
+    if (!response.ok || !result || result.ok !== true) {
+      let detail = result && result.error && result.error.message
+        ? result.error.message
+        : `Printer service returned HTTP ${response.status}`;
+      throw new Error(detail);
+    }
+    console.info("[Apple Report] Receipt printed:", result);
+    reportPrintState = "printed";
+  } catch (error) {
+    console.error("[Apple Report] PRINT RECEIPT failed:", error);
+    reportPrintState = "failed";
+  }
+
+  requestRender("report-print-result");
+  reportPrintResetTimer = setTimeout(() => {
+    reportPrintState = "idle";
+    requestRender("report-print-reset");
+  }, 2600);
+}
+
+function buildAppleReportPrintPayload() {
+  let personalDrawings = prompts.map((_, index) => {
+    return getReportPersonalDrawing(index) || getLatestReportDrawing(index);
+  });
+  let latest = personalDrawings.filter(Boolean).sort((a, b) => {
+    return new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime();
+  })[0] || null;
+  let date = latest && latest.createdAt ? new Date(latest.createdAt) : new Date();
+  let reportId = latest
+    ? String(latest.dbId || latest.id || "PENDING").slice(-8).toUpperCase()
+    : "PENDING";
+  let reflectionDrawing = personalDrawings.find((drawing) => {
+    return drawing && typeof drawing.reflection_text === "string" &&
+      drawing.reflection_text.trim();
+  });
+  let promptNames = [
+    "DEFAULT APPLE",
+    "TOUCH MEMORY",
+    "TASTE MEMORY",
+    "IMPERFECT MEMORY"
+  ];
+
+  return {
+    reportId,
+    date: formatReportDate(date),
+    reflection: reflectionDrawing ? reflectionDrawing.reflection_text.trim() : "",
+    apples: personalDrawings.map((drawing, index) => {
+      return {
+        prompt: promptNames[index],
+        similarity: hasCloseReportMatch(index)
+          ? getReportSimilarityScore(index)
+          : null,
+        imageUrl: getReportPrintImageUrl(drawing)
+      };
+    })
+  };
+}
+
+function getReportPrintImageUrl(drawing) {
+  if (!drawing) return null;
+  return drawing.image_url ||
+    drawing.thumb_url ||
+    drawing.imageUrl ||
+    drawing.thumbUrl ||
+    null;
 }
