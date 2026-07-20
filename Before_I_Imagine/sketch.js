@@ -753,9 +753,9 @@ function sizeDrawingButton(btn) {
 }
 
 function setDesktopButtonAutoSize(btn, minW, padding = "8px 14px") {
-  btn.style("display", "inline-flex");
   btn.style("align-items", "center");
   btn.style("justify-content", "center");
+  btn.style("text-align", "center");
   btn.style("width", "auto");
   btn.style("height", "auto");
   btn.style("min-width", `${minW}px`);
@@ -1180,6 +1180,8 @@ function toggleDrawSidebar() {
   archiveRowVelocity = [0, 0, 0, 0];
   archiveRowAutoPanTarget = [null, null, null, null];
   layoutInterface();
+  lastButtonVisibilityKey = "";
+  updateButtonVisibility();
   generateDrawBackgroundApplesLayout();
   requestRender("sidebar-toggle");
 }
