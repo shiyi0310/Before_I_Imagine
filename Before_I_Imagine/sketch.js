@@ -2301,6 +2301,49 @@ function getDrawingReflectionText(d) {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function getWallReflectionLabelMetrics(reflection, mobile) {
+  let characterCount = Array.from(reflection || "").length;
+  let noteW = mobile
+    ? constrain(126 + max(0, min(characterCount, 34) - 12) * 1.25, 126, 154)
+    : constrain(148 + max(0, min(characterCount, 44) - 14) * 1.55, 148, 194);
+  let textSizeValue = characterCount > 72
+    ? (mobile ? 7.8 : 8.5)
+    : characterCount > 44
+      ? (mobile ? 8.5 : 9)
+      : (mobile ? 9 : 10);
+  let textWidthLimit = noteW - 20;
+  let lineCount = 1;
+  let lineWidth = 0;
+
+  push();
+  textFont(interfaceFont);
+  textSize(textSizeValue);
+  for (let character of Array.from(reflection || "")) {
+    if (character === "\n") {
+      lineCount++;
+      lineWidth = 0;
+      continue;
+    }
+    let characterWidth = textWidth(character);
+    if (lineWidth > 0 && lineWidth + characterWidth > textWidthLimit) {
+      lineCount++;
+      lineWidth = characterWidth;
+    } else {
+      lineWidth += characterWidth;
+    }
+  }
+  pop();
+
+  let lineHeight = textSizeValue * 1.38;
+  let noteH = max(mobile ? 72 : 80, 10 + lineCount * lineHeight + 22);
+  return {
+    w: noteW,
+    h: noteH,
+    textSize: textSizeValue,
+    lineHeight: lineHeight
+  };
+}
+
 function generateWallMemoryFieldLayout() {
   wallFieldLayout = [];
   let frame = getWallFieldViewport();
@@ -2335,13 +2378,14 @@ function generateWallMemoryFieldLayout() {
     let row = floor(i / columns);
     let reflection = getDrawingReflectionText(d);
     let hasReflection = reflection.length > 0;
+    let noteMetrics = getWallReflectionLabelMetrics(reflection, mobile);
     let appleSize = lerp(mobile ? 42 : 48, mobile ? 66 : 82, wallStableValue(d, i, 1));
     let jitterX = lerp(-cellW * 0.22, cellW * 0.22, wallStableValue(d, i, 2));
     let jitterY = lerp(-cellH * 0.2, cellH * 0.2, wallStableValue(d, i, 3));
     let x = startX + column * cellW + jitterX;
     let y = startY + row * cellH + jitterY;
-    let noteW = mobile ? 126 : 148;
-    let noteH = mobile ? 72 : 80;
+    let noteW = noteMetrics.w;
+    let noteH = noteMetrics.h;
     let noteSide = wallStableValue(d, i, 4) > 0.5 ? 1 : -1;
     let noteX = x + noteSide * (appleSize * 0.72 + noteW * 0.56);
     let noteY = y + lerp(-22, 22, wallStableValue(d, i, 5));
@@ -2359,6 +2403,8 @@ function generateWallMemoryFieldLayout() {
       noteY: noteY,
       noteW: noteW,
       noteH: noteH,
+      noteTextSize: noteMetrics.textSize,
+      noteLineHeight: noteMetrics.lineHeight,
       noteColorIndex: floor(wallStableValue(d, i, 8) * 4),
       cachedThumb: null
     });
@@ -2495,6 +2541,7 @@ function drawWallFieldApple(d, item) {
 }
 
 function drawWallReflectionLabel(d, item) {
+  push();
   let colors = [
     [247, 229, 170],
     [244, 207, 204],
@@ -2535,7 +2582,9 @@ function drawWallReflectionLabel(d, item) {
   noStroke();
   fill(35, 32, 29, 210);
   textAlign(LEFT, TOP);
-  textSize(10);
+  textSize(item.noteTextSize || 10);
+  textLeading(item.noteLineHeight || 13.8);
+  textWrap(CHAR);
   text(
     item.reflection,
     item.noteX - item.noteW / 2 + 10,
@@ -2543,6 +2592,7 @@ function drawWallReflectionLabel(d, item) {
     item.noteW - 20,
     item.noteH - 27
   );
+  textWrap(WORD);
 
   fill(74, 68, 62, 135);
   textSize(7.5);
@@ -2555,6 +2605,7 @@ function drawWallReflectionLabel(d, item) {
   noStroke();
   fill(70, 66, 61, 155);
   circle(item.noteX + item.noteW / 2 - 7, item.noteY - item.noteH / 2 + 7, 4);
+  pop();
 }
 
 function getWallFieldControlRects() {
@@ -3783,6 +3834,7 @@ function drawSelectedApplePopup() {
     textSize(10);
     text(selectedApple.notes, r.x + 22, extraY + 26, r.w - 44, 70);
   }
+
 }
 
 function getApplePopupRect() {
