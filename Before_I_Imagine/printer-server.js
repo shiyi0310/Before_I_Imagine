@@ -3,11 +3,31 @@
 const express = require("express");
 const cors = require("cors");
 const sharp = require("sharp");
+const opentype = require("opentype.js");
+const fs = require("fs");
+const path = require("path");
 const { usb } = require("usb");
 
 const HOST = "127.0.0.1";
 const PORT = Number(process.env.PRINTER_PORT || 3001);
 const RECEIPT_WIDTH = 384;
+const RECEIPT_PREVIEW_PATH = path.join(__dirname, "receipt-preview.png");
+const IBM_PLEX_MONO_DIR = path.join(
+  path.dirname(require.resolve("@ibm/plex-mono/package.json")),
+  "fonts",
+  "complete",
+  "woff"
+);
+const receiptFonts = {
+  regular: loadReceiptFont("IBMPlexMono-Regular.woff"),
+  semibold: loadReceiptFont("IBMPlexMono-SemiBold.woff")
+};
+
+function loadReceiptFont(filename) {
+  const data = fs.readFileSync(path.join(IBM_PLEX_MONO_DIR, filename));
+  const buffer = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength);
+  return opentype.parse(buffer);
+}
 const DEFAULT_ALLOWED_ORIGINS = [
   "http://127.0.0.1:5500",
   "http://localhost:5500",
@@ -75,21 +95,43 @@ app.post("/print-report", async (req, res) => {
   }
 });
 
+app.post("/preview-report", async (req, res) => {
+  try {
+    const receipt = await createReportReceipt(req.body || {});
+    await saveRasterPreview(receipt, RECEIPT_PREVIEW_PATH);
+    res.json({
+      ok: true,
+      width: receipt.width,
+      height: receipt.height,
+      previewPath: RECEIPT_PREVIEW_PATH
+    });
+  } catch (error) {
+    console.error("[printer] Preview generation failed:", error);
+    res.status(500).json({ ok: false, error: serializeError(error) });
+  }
+});
+
+app.get("/receipt-preview.png", (_req, res) => {
+  res.sendFile(RECEIPT_PREVIEW_PATH);
+});
+
 app.use((error, _req, res, _next) => {
   console.error("[printer] Request error:", error);
   res.status(400).json({ ok: false, error: serializeError(error) });
 });
 
-app.listen(PORT, HOST, async () => {
-  console.log(`[printer] Local service listening at http://${HOST}:${PORT}`);
-  console.log(`[printer] Allowed web origins: ${Array.from(ALLOWED_ORIGINS).join(", ")}`);
-  try {
-    const descriptor = await detectPrinterDescriptor();
-    console.log("[printer] USB printer ready:", descriptor);
-  } catch (error) {
-    console.error("[printer] USB printer is not ready:", error);
-  }
-});
+if (require.main === module) {
+  app.listen(PORT, HOST, async () => {
+    console.log(`[printer] Local service listening at http://${HOST}:${PORT}`);
+    console.log(`[printer] Allowed web origins: ${Array.from(ALLOWED_ORIGINS).join(", ")}`);
+    try {
+      const descriptor = await detectPrinterDescriptor();
+      console.log("[printer] USB printer ready:", descriptor);
+    } catch (error) {
+      console.error("[printer] USB printer is not ready:", error);
+    }
+  });
+}
 
 function enqueuePrint(job) {
   const queued = printQueue.then(job, job);
@@ -266,6 +308,7 @@ async function createReportReceipt(payload) {
     return {
       prompt: cleanSingleLine(apple.prompt || "APPLE"),
       similarity: formatSimilarity(apple.similarity),
+      appleNumber: normalizeAppleNumber(apple.appleNumber),
       imageDataUrl: source ? await prepareAppleImage(source) : null
     };
   }));
@@ -280,18 +323,18 @@ async function createReportReceipt(payload) {
 }
 
 function buildReceiptSvg(data) {
-  const margin = 18;
-  const contentWidth = RECEIPT_WIDTH - margin * 2;
+  const margin = 28;
   const parts = [];
-  let y = 18;
+  let y = 30;
 
   const text = (value, x, top, options = {}) => {
     parts.push(svgText(value, x, top, options));
   };
-  const rule = (top) => {
+  const rule = (top, dashed = false) => {
     parts.push(
       `<line x1="${margin}" y1="${top}" x2="${RECEIPT_WIDTH - margin}" ` +
-      `y2="${top}" stroke="#000" stroke-width="1"/>`
+      `y2="${top}" stroke="#000" stroke-width="1"` +
+      `${dashed ? ` stroke-dasharray="4 4"` : ""}/>`
     );
   };
 
@@ -322,92 +365,111 @@ function buildReceiptSvg(data) {
 
   text("BEFORE I IMAGINE", RECEIPT_WIDTH / 2, y, {
     anchor: "middle",
-    size: 22,
-    weight: 700
+    size: 21,
+    weight: 600
   });
-  y += 31;
+  y += 33;
   text("APPLE REPORT", RECEIPT_WIDTH / 2, y, {
     anchor: "middle",
-    size: 19,
-    weight: 700
+    size: 21,
+    weight: 600
   });
-  y += 29;
-  rule(y);
-  y += 19;
-  text(`REPORT ID: #${data.reportId}`, margin, y, { size: 15, weight: 600 });
-  y += 22;
-  text(`DATE: ${data.date || "PENDING"}`, margin, y, { size: 15 });
+  drawBinaryApple(parts, 327, 55);
+  y += 82;
+  text("A record of one drawing session.", RECEIPT_WIDTH / 2, y, {
+    anchor: "middle",
+    size: 13
+  });
   y += 27;
+  rule(y, true);
+  y += 15;
 
+  text("REPORT ID:", margin, y, { size: 14 });
+  text(`#${data.reportId}`, RECEIPT_WIDTH - margin, y - 2, {
+    anchor: "end",
+    size: 24
+  });
+  y += 30;
+  text("DATE:", margin, y, { size: 14 });
+  text(data.date || "PENDING", RECEIPT_WIDTH - margin, y, {
+    anchor: "end",
+    size: 15
+  });
+  y += 27;
+  rule(y, true);
+  y += 15;
+  text(`ARCHIVE ${formatAppleNumberRange(data.apples)}`, margin, y, {
+    size: 17,
+    weight: 600
+  });
+  y += 43;
+
+  const imageW = 142;
+  const imageH = 114;
+  const imageXs = [30, 212];
+  const imageRows = [y, y + 135];
+  drawCropMark(parts, RECEIPT_WIDTH - 70, y - 16, "top-right");
   data.apples.forEach((apple, index) => {
-    rule(y);
-    y += 18;
-    text(`0${index + 1} ${apple.prompt}`, margin, y, { size: 17, weight: 700 });
-    y += 26;
-
+    const imageX = imageXs[index % 2];
+    const imageY = imageRows[Math.floor(index / 2)];
     if (apple.imageDataUrl) {
-      const imageW = 190;
-      const imageH = 132;
       parts.push(
-        `<image href="${apple.imageDataUrl}" x="${(RECEIPT_WIDTH - imageW) / 2}" ` +
-        `y="${y}" width="${imageW}" height="${imageH}" preserveAspectRatio="xMidYMid meet"/>`
+        `<image href="${apple.imageDataUrl}" x="${imageX}" y="${imageY}" ` +
+        `width="${imageW}" height="${imageH}" preserveAspectRatio="xMidYMid meet"/>`
       );
-      y += imageH + 8;
     } else {
-      text("[IMAGE UNAVAILABLE]", RECEIPT_WIDTH / 2, y + 44, {
+      text("[IMAGE UNAVAILABLE]", imageX + imageW / 2, imageY + 48, {
+        anchor: "middle",
+        size: 10
+      });
+    }
+  });
+  y += 275;
+  drawCropMark(parts, margin, y - 14, "bottom-left");
+  y += 16;
+  rule(y, true);
+  y += 17;
+
+  text("REFLECTION", margin, y, { size: 15, weight: 600 });
+  y += 46;
+  if (data.reflection) {
+    const reflectionLines = wrapReceiptText(data.reflection, 32);
+    text("'", RECEIPT_WIDTH / 2 - 112, y, { size: 15 });
+    reflectionLines.forEach((line) => {
+      text(line, RECEIPT_WIDTH / 2, y, {
         anchor: "middle",
         size: 14
       });
-      y += 104;
-    }
-    text(`SIMILARITY: ${apple.similarity}`, RECEIPT_WIDTH / 2, y, {
-      anchor: "middle",
-      size: 17,
-      weight: 700
+      y += 20;
     });
-    y += 31;
-  });
-
-  rule(y);
-  y += 20;
-  if (data.reflection) {
-    text("REFLECTION", margin, y, { size: 17, weight: 700 });
-    y += 25;
-    const reflectionLines = wrapReceiptText(data.reflection, 34);
-    reflectionLines.forEach((line) => {
-      text(line, margin, y, { size: 15 });
-      y += 21;
-    });
-    y += 8;
-    rule(y);
-    y += 22;
+    text("'", RECEIPT_WIDTH / 2 + 112, y - 20, { size: 15 });
+  } else {
+    y += 20;
   }
-
-  text("PERSONAL APPLE", RECEIPT_WIDTH / 2, y, {
+  y = Math.max(y + 34, 792);
+  rule(y, true);
+  y += 35;
+  text("Thank you for contributing", RECEIPT_WIDTH / 2, y, {
     anchor: "middle",
-    size: 16,
-    weight: 700
+    size: 13
   });
-  y += 23;
-  text("<->", RECEIPT_WIDTH / 2, y, {
+  y += 20;
+  text("to the growing archive.", RECEIPT_WIDTH / 2, y, {
     anchor: "middle",
-    size: 17,
-    weight: 700
+    size: 13
   });
-  y += 23;
-  text("COLLECTIVE APPLE", RECEIPT_WIDTH / 2, y, {
+  y += 38;
+  text("<before-i-imagine>", RECEIPT_WIDTH / 2, y, {
     anchor: "middle",
-    size: 16,
-    weight: 700
+    size: 13,
+    weight: 600
   });
-  y += 30;
-  text("before-i-imagine", RECEIPT_WIDTH / 2, y, {
+  y += 32;
+  text("https://before-i-imagine.onrender.com/", RECEIPT_WIDTH / 2, y, {
     anchor: "middle",
-    size: 14
+    size: 10
   });
-  y += 27;
-  rule(y);
-  y += 18;
+  y += 35;
 
   return wrapSvg(parts, y);
 }
@@ -425,18 +487,33 @@ function svgText(value, x, y, options = {}) {
   const size = options.size || 15;
   const weight = options.weight || 400;
   const anchor = options.anchor || "start";
-  return (
-    `<text x="${x}" y="${y + size}" fill="#000" font-family="Menlo, Monaco, monospace" ` +
-    `font-size="${size}" font-weight="${weight}" text-anchor="${anchor}">` +
-    `${escapeXml(value)}</text>`
-  );
+  const font = weight >= 600 ? receiptFonts.semibold : receiptFonts.regular;
+  const stringValue = String(value);
+  const canUseIbmPlexMono = Array.from(stringValue).every((character) => {
+    return character === "\n" || font.charToGlyph(character).index !== 0;
+  });
+  if (!canUseIbmPlexMono) {
+    return (
+      `<text x="${x}" y="${y + size}" fill="#000" ` +
+      `font-family="PingFang SC, Hiragino Sans GB, sans-serif" ` +
+      `font-size="${size}" font-weight="${weight}" text-anchor="${anchor}">` +
+      `${escapeXml(stringValue)}</text>`
+    );
+  }
+
+  const advanceWidth = font.getAdvanceWidth(stringValue, size);
+  let pathX = x;
+  if (anchor === "middle") pathX -= advanceWidth / 2;
+  if (anchor === "end") pathX -= advanceWidth;
+  const pathData = font.getPath(stringValue, pathX, y + size, size).toPathData(2);
+  return `<path d="${pathData}" fill="#000"/>`;
 }
 
 async function prepareAppleImage(source) {
   const input = await loadImageSource(source);
   const png = await sharp(input)
     .flatten({ background: "#ffffff" })
-    .resize(190, 132, {
+    .resize(142, 114, {
       fit: "contain",
       background: "#ffffff",
       withoutEnlargement: false
@@ -446,6 +523,56 @@ async function prepareAppleImage(source) {
     .png()
     .toBuffer();
   return `data:image/png;base64,${png.toString("base64")}`;
+}
+
+function normalizeAppleNumber(value) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? Math.round(number) : null;
+}
+
+function formatAppleNumberRange(apples) {
+  const numbers = apples
+    .map((apple) => apple.appleNumber)
+    .filter((number) => Number.isFinite(number));
+  if (!numbers.length) return "#----";
+  const first = Math.min(...numbers);
+  const last = Math.max(...numbers);
+  return first === last ? `#${first}` : `#${first}-#${last}`;
+}
+
+function drawBinaryApple(parts, x, y) {
+  const rows = [
+    "11",
+    "10",
+    "00111100",
+    "01111110",
+    "111001111",
+    "111001111",
+    "011111110",
+    "001111100"
+  ];
+  rows.forEach((row, index) => {
+    parts.push(svgText(row, x, y + index * 7, {
+      anchor: "middle",
+      size: 5,
+      weight: 600
+    }));
+  });
+}
+
+function drawCropMark(parts, x, y, corner) {
+  const size = 30;
+  if (corner === "top-right") {
+    parts.push(
+      `<path d="M ${x - size} ${y} H ${x} V ${y + size}" ` +
+      `fill="none" stroke="#000" stroke-width="2"/>`
+    );
+    return;
+  }
+  parts.push(
+    `<path d="M ${x} ${y - size} V ${y} H ${x + size}" ` +
+    `fill="none" stroke="#000" stroke-width="2"/>`
+  );
 }
 
 async function loadImageSource(source) {
@@ -498,6 +625,25 @@ async function rasterizeReceipt(svg) {
     bytesPerRow: Math.ceil(info.width / 8),
     data: raster
   };
+}
+
+async function saveRasterPreview(receipt, outputPath) {
+  const pixels = Buffer.alloc(receipt.width * receipt.height, 255);
+  for (let y = 0; y < receipt.height; y++) {
+    for (let x = 0; x < receipt.width; x++) {
+      const byte = receipt.data[y * receipt.bytesPerRow + (x >> 3)];
+      if (byte & (0x80 >> (x & 7))) {
+        pixels[y * receipt.width + x] = 0;
+      }
+    }
+  }
+  await sharp(pixels, {
+    raw: {
+      width: receipt.width,
+      height: receipt.height,
+      channels: 1
+    }
+  }).png().toFile(outputPath);
 }
 
 function floydSteinbergToRaster(grayscale, width, height) {
@@ -600,3 +746,9 @@ function serializeError(error) {
       : undefined
   };
 }
+
+module.exports = {
+  RECEIPT_PREVIEW_PATH,
+  createReportReceipt,
+  saveRasterPreview
+};

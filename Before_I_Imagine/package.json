@@ -12,9 +12,11 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "@ibm/plex-mono": "^2.5.0",
     "@supabase/supabase-js": "^2.108.2",
     "cors": "^2.8.6",
     "express": "^5.2.1",
+    "opentype.js": "^2.0.0",
     "sharp": "^0.35.3",
     "usb": "^3.0.1"
   }

@@ -398,10 +398,24 @@ function buildAppleReportPrintPayload() {
         similarity: hasCloseReportMatch(index)
           ? getReportSimilarityScore(index)
           : null,
+        appleNumber: getReportPrintAppleNumber(drawing),
         imageUrl: getReportPrintImageUrl(drawing)
       };
     })
   };
+}
+
+function getReportPrintAppleNumber(drawing) {
+  if (!drawing) return null;
+  let number = Number(
+    drawing.apple_number ??
+    drawing.appleNumber ??
+    drawing.number
+  );
+  if (Number.isFinite(number) && number > 0) return Math.round(number);
+
+  let archiveIndex = archive.indexOf(drawing);
+  return archiveIndex >= 0 ? archiveIndex + 1 : null;
 }
 
 function getReportPrintImageUrl(drawing) {
