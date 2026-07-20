@@ -131,6 +131,7 @@ let modalOpen = true;
 let mobileArchiveReady = false;
 let backgroundViewMode = "wall";
 let backgroundLayoutMode = "float";
+let drawSidebarCollapsed = false;
 let selectedApple = null;
 let selectedAppleIndex = -1;
 let selectedAppleReplayStartedAt = 0;
@@ -1130,9 +1131,57 @@ function drawPaperBackground() {
   rect(0, 0, width, height);
 }
 
-function getDrawSidebarWidth() {
+function getExpandedDrawSidebarWidth() {
   if (isMobileScreen()) return 0;
   return constrain(width * (isCompactDesktop() ? 0.18 : 0.135), isCompactDesktop() ? 176 : 198, isCompactDesktop() ? 210 : 232);
+}
+
+function getDrawSidebarWidth() {
+  if (isMobileScreen() || drawSidebarCollapsed) return 0;
+  return getExpandedDrawSidebarWidth();
+}
+
+function getDrawSidebarToggleRect() {
+  let expandedW = getExpandedDrawSidebarWidth();
+  return {
+    x: drawSidebarCollapsed ? 0 : expandedW - 7,
+    y: height / 2 - 24,
+    w: 15,
+    h: 48
+  };
+}
+
+function drawDrawSidebarToggle() {
+  if (isMobileScreen()) return;
+  let r = getDrawSidebarToggleRect();
+
+  drawingContext.save();
+  drawingContext.shadowColor = "rgba(42, 35, 25, 0.14)";
+  drawingContext.shadowBlur = 10;
+  drawingContext.shadowOffsetX = 2;
+  noStroke();
+  fill(251, 250, 246, 245);
+  rect(r.x, r.y, r.w, r.h, 6);
+  drawingContext.restore();
+
+  stroke(82, 76, 69, 185);
+  strokeWeight(1.2);
+  let cx = r.x + r.w / 2;
+  let cy = r.y + r.h / 2;
+  let direction = drawSidebarCollapsed ? 1 : -1;
+  line(cx - direction * 2, cy - 5, cx + direction * 2, cy);
+  line(cx + direction * 2, cy, cx - direction * 2, cy + 5);
+}
+
+function toggleDrawSidebar() {
+  if (isMobileScreen()) return;
+  drawSidebarCollapsed = !drawSidebarCollapsed;
+  archiveRowPan = [0, 0, 0, 0];
+  archiveRowVelocity = [0, 0, 0, 0];
+  archiveRowAutoPanTarget = [null, null, null, null];
+  layoutInterface();
+  generateDrawBackgroundApplesLayout();
+  requestRender("sidebar-toggle");
 }
 
 function getBackgroundThumbSize() {
@@ -1288,6 +1337,10 @@ function getReopenDrawingButtonRect() {
 
 function drawDrawPageSidebar() {
   if (isMobileScreen()) return;
+  if (drawSidebarCollapsed) {
+    drawDrawSidebarToggle();
+    return;
+  }
 
   let w = getDrawSidebarWidth();
   let pad = isCompactDesktop() ? 22 : 30;
@@ -1325,13 +1378,10 @@ function drawDrawPageSidebar() {
 
   drawSidebarSparkline(pad, 242, innerW, 24);
 
-  let archivePageOpen = page === "draw" && !modalOpen && backgroundViewMode === "archive";
-  if (!archivePageOpen) {
-    fill(mutedCol);
-    textSize(11);
-    text("RECENT APPLES", pad, 302, innerW);
-    drawSidebarRecentApples(pad, 330, innerW);
-  }
+  fill(mutedCol);
+  textSize(11);
+  text("RECENT APPLES", pad, 302, innerW);
+  drawSidebarRecentApples(pad, 330, innerW);
 
   stroke(226, 220, 210);
   strokeWeight(1);
@@ -1347,6 +1397,7 @@ function drawDrawPageSidebar() {
   textLeading(19);
   text("Draw from memory.\nNot from images.\nNot from search.\nJust what comes first.", pad, aboutY + 44, innerW);
 
+  drawDrawSidebarToggle();
 }
 
 function drawSidebarSparkline(x, y, w, h) {
@@ -3732,6 +3783,11 @@ function pointInsideArchiveWallPopupClose(x, y) {
 }
 
 function handleDrawPageClick(x, y) {
+  if (isClickOnDrawSidebarToggle(x, y)) {
+    toggleDrawSidebar();
+    return true;
+  }
+
   if (backgroundViewMode === "archive" && isClickOnApplePopupClose(x, y)) {
     selectedApple = null;
     selectedAppleIndex = -1;
@@ -4014,6 +4070,10 @@ function isClickOnModal(x, y) {
 
 function isClickOnSidebar(x, y) {
   return !isMobileScreen() && x <= getDrawSidebarWidth();
+}
+
+function isClickOnDrawSidebarToggle(x, y) {
+  return !isMobileScreen() && pointInsideRect(x, y, getDrawSidebarToggleRect());
 }
 
 function isClickOnViewSwitcher(x, y) {
