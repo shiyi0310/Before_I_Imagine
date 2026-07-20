@@ -595,19 +595,20 @@ function formatAppleNumberRange(apples) {
 
 function drawBinaryApple(parts, x, y) {
   const rows = [
-    "11",
-    "10",
-    "00111100",
-    "01111110",
-    "111001111",
-    "111001111",
-    "011111110",
-    "001111100"
+    "      11    ",
+    "     10  00 ",
+    "  000  00   ",
+    " 00      00 ",
+    "00        00",
+    "00        00",
+    " 00      00 ",
+    "  00    00  ",
+    "   000000   "
   ];
   rows.forEach((row, index) => {
     parts.push(svgText(row, x, y + index * 7, {
       anchor: "middle",
-      size: 5,
+      size: 6.5,
       weight: 600
     }));
   });
