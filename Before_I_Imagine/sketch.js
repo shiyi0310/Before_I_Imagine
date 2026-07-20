@@ -304,6 +304,7 @@ function renderNeedsContinuousLoop() {
   if (reflectionModalOpen && reflectionUpdating) return true;
   if (selectedApplePlaybackActive()) return true;
   if (archivePlaybackActive()) return true;
+  if (isTopWallMode()) return true;
   if (abs(archiveTransition - archiveTargetTransition) > 0.01) return true;
   if (page === "archiveWall" || page === "layer") return true;
   if (archiveRowDragging || isWallPanning || isArchivePanning) return true;
@@ -350,6 +351,8 @@ function updatePerformanceFrameRate() {
     targetRate = currentAction ? 60 : 45;
   } else if (page === "draw" && !modalOpen && backgroundViewMode === "archive") {
     targetRate = 30;
+  } else if (page === "draw" && !modalOpen && backgroundViewMode === "wall") {
+    targetRate = 18;
   } else if (page === "draw" && !modalOpen) {
     targetRate = 24;
   }
@@ -2353,9 +2356,29 @@ function generateWallMemoryFieldLayout() {
   }
 
   let mobile = isMobileScreen();
-  let cellW = mobile ? 210 : 276;
-  let cellH = mobile ? 154 : 184;
   let count = archive.length;
+  let items = archive.map((d, i) => {
+    let reflection = getDrawingReflectionText(d);
+    let hasReflection = reflection.length > 0;
+    let noteMetrics = getWallReflectionLabelMetrics(reflection, mobile);
+    let appleSize = lerp(mobile ? 42 : 48, mobile ? 66 : 82, wallStableValue(d, i, 1));
+    let groupGap = mobile ? 12 : 18;
+    return {
+      d: d,
+      archiveIndex: i,
+      reflection: reflection,
+      hasReflection: hasReflection,
+      noteMetrics: noteMetrics,
+      appleSize: appleSize,
+      groupGap: groupGap,
+      groupW: hasReflection ? appleSize + groupGap + noteMetrics.w : appleSize,
+      groupH: hasReflection ? max(appleSize, noteMetrics.h) : appleSize
+    };
+  });
+  let maxGroupW = max(items.map(item => item.groupW));
+  let maxGroupH = max(items.map(item => item.groupH));
+  let cellW = max(mobile ? 224 : 292, maxGroupW + (mobile ? 38 : 58));
+  let cellH = max(mobile ? 166 : 198, maxGroupH + (mobile ? 38 : 54));
   let columns = max(mobile ? 4 : 6, ceil(sqrt(count * (mobile ? 1.15 : 1.55))));
   let rows = ceil(count / columns);
   let worldW = max(frame.w * (mobile ? 2.1 : 1.85), columns * cellW);
@@ -2372,23 +2395,32 @@ function generateWallMemoryFieldLayout() {
     h: worldH
   };
 
-  for (let i = 0; i < count; i++) {
-    let d = archive[i];
+  for (let itemData of items) {
+    let i = itemData.archiveIndex;
+    let d = itemData.d;
     let column = i % columns;
     let row = floor(i / columns);
-    let reflection = getDrawingReflectionText(d);
-    let hasReflection = reflection.length > 0;
-    let noteMetrics = getWallReflectionLabelMetrics(reflection, mobile);
-    let appleSize = lerp(mobile ? 42 : 48, mobile ? 66 : 82, wallStableValue(d, i, 1));
-    let jitterX = lerp(-cellW * 0.22, cellW * 0.22, wallStableValue(d, i, 2));
-    let jitterY = lerp(-cellH * 0.2, cellH * 0.2, wallStableValue(d, i, 3));
-    let x = startX + column * cellW + jitterX;
-    let y = startY + row * cellH + jitterY;
+    let reflection = itemData.reflection;
+    let hasReflection = itemData.hasReflection;
+    let noteMetrics = itemData.noteMetrics;
+    let appleSize = itemData.appleSize;
     let noteW = noteMetrics.w;
     let noteH = noteMetrics.h;
     let noteSide = wallStableValue(d, i, 4) > 0.5 ? 1 : -1;
-    let noteX = x + noteSide * (appleSize * 0.72 + noteW * 0.56);
-    let noteY = y + lerp(-22, 22, wallStableValue(d, i, 5));
+    let freeX = max(0, (cellW - itemData.groupW) / 2 - 10);
+    let freeY = max(0, (cellH - itemData.groupH) / 2 - 10);
+    let jitterX = lerp(-min(18, freeX), min(18, freeX), wallStableValue(d, i, 2));
+    let jitterY = lerp(-min(15, freeY), min(15, freeY), wallStableValue(d, i, 3));
+    let groupX = startX + column * cellW + jitterX;
+    let groupY = startY + row * cellH + jitterY;
+    let x = hasReflection
+      ? groupX - noteSide * (noteW + itemData.groupGap) / 2
+      : groupX;
+    let y = groupY;
+    let noteX = hasReflection
+      ? groupX + noteSide * (appleSize + itemData.groupGap) / 2
+      : groupX;
+    let noteY = groupY;
 
     wallFieldLayout.push({
       archiveIndex: i,
@@ -2406,12 +2438,24 @@ function generateWallMemoryFieldLayout() {
       noteTextSize: noteMetrics.textSize,
       noteLineHeight: noteMetrics.lineHeight,
       noteColorIndex: floor(wallStableValue(d, i, 8) * 4),
+      floatPhase: wallStableValue(d, i, 9) * TWO_PI,
+      floatSpeed: lerp(0.00016, 0.00028, wallStableValue(d, i, 10)),
+      floatDriftX: lerp(1.5, 3.8, wallStableValue(d, i, 11)),
+      floatDriftY: lerp(2, 4.5, wallStableValue(d, i, 12)),
       cachedThumb: null
     });
   }
 
   if (!wallCameraInitialized) fitWallCameraToWorld();
   else constrainTopWallCamera();
+}
+
+function getWallFieldFloatOffset(item) {
+  let t = millis() * (item.floatSpeed || 0.0002) + (item.floatPhase || 0);
+  return {
+    x: sin(t) * (item.floatDriftX || 0),
+    y: cos(t * 0.83) * (item.floatDriftY || 0)
+  };
 }
 
 function drawWallMemoryField() {
@@ -2434,10 +2478,14 @@ function drawWallMemoryField() {
       if (preview) item.cachedThumb = preview;
     }
 
+    let floatOffset = getWallFieldFloatOffset(item);
+    push();
+    translate(floatOffset.x, floatOffset.y);
     drawWallFieldApple(d, item);
     if (item.hasReflection && wallCamera.zoom >= 0.5) {
       drawWallReflectionLabel(d, item);
     }
+    pop();
   }
 
   pop();
@@ -2827,13 +2875,18 @@ function getWallFieldItemAt(screenX, screenY) {
   let p = screenToTopWall(screenX, screenY);
   for (let i = wallFieldLayout.length - 1; i >= 0; i--) {
     let item = wallFieldLayout[i];
+    let floatOffset = getWallFieldFloatOffset(item);
+    let itemX = item.x + floatOffset.x;
+    let itemY = item.y + floatOffset.y;
+    let noteX = item.noteX + floatOffset.x;
+    let noteY = item.noteY + floatOffset.y;
     let appleHit = (
-      abs(p.x - item.x) <= item.size * 0.58 &&
-      abs(p.y - item.y) <= item.size * 0.58
+      abs(p.x - itemX) <= item.size * 0.58 &&
+      abs(p.y - itemY) <= item.size * 0.58
     );
     let noteHit = item.hasReflection && wallCamera.zoom >= 0.5 && (
-      abs(p.x - item.noteX) <= item.noteW / 2 &&
-      abs(p.y - item.noteY) <= item.noteH / 2
+      abs(p.x - noteX) <= item.noteW / 2 &&
+      abs(p.y - noteY) <= item.noteH / 2
     );
     if (appleHit || noteHit) return item.archiveIndex;
   }
