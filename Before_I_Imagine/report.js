@@ -265,13 +265,9 @@ function drawAppleReportSummary(summary, personalDrawings) {
     text(summaryScore, splitX - 52, rowY);
   }
 
-  let reflection = "";
-  for (let drawing of personalDrawings) {
-    if (drawing && drawing.reflection_text) {
-      reflection = drawing.reflection_text;
-      break;
-    }
-  }
+  let reflection = collectReportReflections(personalDrawings)
+    .map((entry) => `${entry.number}: ${entry.text}`)
+    .join("\n");
   fill(70, 66, 61);
   textSize(mobile ? 5.5 : 7.5);
   text(
@@ -377,10 +373,6 @@ function buildAppleReportPrintPayload() {
   let reportId = latest
     ? String(latest.dbId || latest.id || "PENDING").slice(-8).toUpperCase()
     : "PENDING";
-  let reflectionDrawing = personalDrawings.find((drawing) => {
-    return drawing && typeof drawing.reflection_text === "string" &&
-      drawing.reflection_text.trim();
-  });
   let promptNames = [
     "DEFAULT APPLE",
     "TOUCH MEMORY",
@@ -391,7 +383,9 @@ function buildAppleReportPrintPayload() {
   return {
     reportId,
     date: formatReportDate(date),
-    reflection: reflectionDrawing ? reflectionDrawing.reflection_text.trim() : "",
+    reflection: collectReportReflections(personalDrawings, promptNames)
+      .map((entry) => `${entry.number} ${entry.prompt}\n${entry.text}`)
+      .join("\n\n"),
     apples: personalDrawings.map((drawing, index) => {
       return {
         prompt: promptNames[index],
@@ -403,6 +397,19 @@ function buildAppleReportPrintPayload() {
       };
     })
   };
+}
+
+function collectReportReflections(personalDrawings, promptNames = []) {
+  return personalDrawings.flatMap((drawing, index) => {
+    if (!drawing || typeof drawing.reflection_text !== "string") return [];
+    let reflection = drawing.reflection_text.trim();
+    if (!reflection) return [];
+    return [{
+      number: String(index + 1).padStart(2, "0"),
+      prompt: promptNames[index] || "",
+      text: reflection
+    }];
+  });
 }
 
 function getReportPrintAppleNumber(drawing) {
