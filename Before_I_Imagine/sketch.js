@@ -175,12 +175,16 @@ let averageAppleCache = [null, null, null, null];
 let mobileArchivePressPoint = { x: 0, y: 0 };
 let mobileArchiveDragDistance = 0;
 let wallCamera = { x: 0, y: 0, zoom: 1 };
-let wallMinZoom = 0.55;
+let wallMinZoom = 0.28;
 let wallMaxZoom = 2.6;
 let isWallPanning = false;
 let lastWallPanPoint = { x: 0, y: 0 };
 let wallPressPoint = { x: 0, y: 0 };
 let wallDragDistance = 0;
+let wallFieldLayout = [];
+let wallWorldBounds = { x: 0, y: 0, w: 1, h: 1 };
+let wallCameraInitialized = false;
+let wallHelpVisible = false;
 let isArchivePanning = false;
 let lastPanPoint = { x: 0, y: 0 };
 
@@ -298,7 +302,6 @@ function renderNeedsContinuousLoop() {
   if (selectedApplePlaybackActive()) return true;
   if (archivePlaybackActive()) return true;
   if (abs(archiveTransition - archiveTargetTransition) > 0.01) return true;
-  if (page === "draw" && !modalOpen && backgroundViewMode === "wall") return true;
   if (page === "archiveWall" || page === "layer") return true;
   if (archiveRowDragging || isWallPanning || isArchivePanning) return true;
   for (let v of archiveRowVelocity) {
@@ -1028,6 +1031,8 @@ function drawImmersiveDrawingPage() {
     } else if (backgroundViewMode === "archive") {
       drawMemoryArchiveView();
       drawFloatingArchiveApples();
+    } else if (backgroundViewMode === "wall") {
+      drawWallMemoryField();
     } else {
       drawFloatingArchiveApples();
     }
@@ -1040,6 +1045,8 @@ function drawImmersiveDrawingPage() {
       drawAverageAppleView();
     } else if (backgroundViewMode === "archive") {
       drawMobileArchiveView();
+    } else if (backgroundViewMode === "wall") {
+      drawWallMemoryField();
     } else {
       drawFloatingArchiveApples();
     }
@@ -1063,7 +1070,7 @@ function drawImmersiveDrawingPage() {
     drawReopenDrawingButton();
   }
 
-  if (!modalOpen && backgroundViewMode === "archive") {
+  if (!modalOpen && (backgroundViewMode === "archive" || backgroundViewMode === "wall")) {
     drawSelectedApplePopup();
   }
 
@@ -1183,6 +1190,7 @@ function toggleDrawSidebar() {
   lastButtonVisibilityKey = "";
   updateButtonVisibility();
   generateDrawBackgroundApplesLayout();
+  generateWallMemoryFieldLayout();
   requestRender("sidebar-toggle");
 }
 
@@ -2255,6 +2263,548 @@ function drawFloatingWallCard(d, item) {
     drawMissingImagePlaceholder(item.size, item.size);
   }
   pop();
+}
+
+function isTopWallMode() {
+  return page === "draw" && !modalOpen && backgroundViewMode === "wall";
+}
+
+function getWallFieldViewport() {
+  let sidebarW = isMobileScreen() ? 0 : getDrawSidebarWidth();
+  return {
+    x: sidebarW,
+    y: 0,
+    w: max(1, width - sidebarW),
+    h: height
+  };
+}
+
+function wallStableValue(d, index, salt) {
+  let source = String(
+    (d && (d.dbId || d.id || d.createdAt)) ||
+    index
+  ) + ":" + salt;
+  let hash = 2166136261;
+  for (let i = 0; i < source.length; i++) {
+    hash ^= source.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0) / 4294967295;
+}
+
+function getDrawingReflectionText(d) {
+  if (!d) return "";
+  let value = d.reflection_text !== undefined ? d.reflection_text : d.reflectionText;
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function generateWallMemoryFieldLayout() {
+  wallFieldLayout = [];
+  let frame = getWallFieldViewport();
+  if (archive.length === 0) {
+    wallWorldBounds = { x: frame.x, y: frame.y, w: frame.w, h: frame.h };
+    return;
+  }
+
+  let mobile = isMobileScreen();
+  let cellW = mobile ? 210 : 276;
+  let cellH = mobile ? 154 : 184;
+  let count = archive.length;
+  let columns = max(mobile ? 4 : 6, ceil(sqrt(count * (mobile ? 1.15 : 1.55))));
+  let rows = ceil(count / columns);
+  let worldW = max(frame.w * (mobile ? 2.1 : 1.85), columns * cellW);
+  let worldH = max(frame.h * (mobile ? 2.0 : 1.65), rows * cellH);
+  let centerX = frame.x + frame.w / 2;
+  let centerY = frame.y + frame.h / 2;
+  let startX = centerX - worldW / 2 + cellW / 2;
+  let startY = centerY - worldH / 2 + cellH / 2;
+
+  wallWorldBounds = {
+    x: centerX - worldW / 2,
+    y: centerY - worldH / 2,
+    w: worldW,
+    h: worldH
+  };
+
+  for (let i = 0; i < count; i++) {
+    let d = archive[i];
+    let column = i % columns;
+    let row = floor(i / columns);
+    let reflection = getDrawingReflectionText(d);
+    let hasReflection = reflection.length > 0;
+    let appleSize = lerp(mobile ? 42 : 48, mobile ? 66 : 82, wallStableValue(d, i, 1));
+    let jitterX = lerp(-cellW * 0.22, cellW * 0.22, wallStableValue(d, i, 2));
+    let jitterY = lerp(-cellH * 0.2, cellH * 0.2, wallStableValue(d, i, 3));
+    let x = startX + column * cellW + jitterX;
+    let y = startY + row * cellH + jitterY;
+    let noteW = mobile ? 126 : 148;
+    let noteH = mobile ? 72 : 80;
+    let noteSide = wallStableValue(d, i, 4) > 0.5 ? 1 : -1;
+    let noteX = x + noteSide * (appleSize * 0.72 + noteW * 0.56);
+    let noteY = y + lerp(-22, 22, wallStableValue(d, i, 5));
+
+    wallFieldLayout.push({
+      archiveIndex: i,
+      x: x,
+      y: y,
+      size: appleSize,
+      alpha: lerp(0.76, 0.98, wallStableValue(d, i, 6)),
+      rotation: lerp(-0.035, 0.035, wallStableValue(d, i, 7)),
+      hasReflection: hasReflection,
+      reflection: reflection,
+      noteX: noteX,
+      noteY: noteY,
+      noteW: noteW,
+      noteH: noteH,
+      noteColorIndex: floor(wallStableValue(d, i, 8) * 4),
+      cachedThumb: null
+    });
+  }
+
+  if (!wallCameraInitialized) fitWallCameraToWorld();
+  else constrainTopWallCamera();
+}
+
+function drawWallMemoryField() {
+  if (archive.length === 0) return;
+  if (wallFieldLayout.length !== archive.length) generateWallMemoryFieldLayout();
+
+  let frame = getWallFieldViewport();
+  clipRect(frame.x, frame.y, frame.w, frame.h);
+  push();
+  applyTopWallCameraTransform();
+
+  let visible = getVisibleWallWorldRect(110);
+  for (let item of wallFieldLayout) {
+    if (!wallFieldItemVisible(item, visible)) continue;
+    let d = archive[item.archiveIndex];
+    if (!d) continue;
+
+    if (!item.cachedThumb) {
+      let preview = getPreviewImage(d);
+      if (preview) item.cachedThumb = preview;
+    }
+
+    drawWallFieldApple(d, item);
+    if (item.hasReflection && wallCamera.zoom >= 0.5) {
+      drawWallReflectionLabel(d, item);
+    }
+  }
+
+  pop();
+  unclip();
+
+  if (!modalOpen) {
+    drawWallFieldControls();
+    drawWallFieldMinimap();
+  }
+}
+
+function applyTopWallCameraTransform() {
+  let frame = getWallFieldViewport();
+  let cx = frame.x + frame.w / 2;
+  let cy = frame.y + frame.h / 2;
+  translate(cx, cy);
+  scale(wallCamera.zoom);
+  translate(-cx + wallCamera.x, -cy + wallCamera.y);
+}
+
+function screenToTopWall(screenX, screenY) {
+  let frame = getWallFieldViewport();
+  let cx = frame.x + frame.w / 2;
+  let cy = frame.y + frame.h / 2;
+  return {
+    x: (screenX - cx) / wallCamera.zoom + cx - wallCamera.x,
+    y: (screenY - cy) / wallCamera.zoom + cy - wallCamera.y
+  };
+}
+
+function getVisibleWallWorldRect(margin = 0) {
+  let frame = getWallFieldViewport();
+  let topLeft = screenToTopWall(frame.x, frame.y);
+  let bottomRight = screenToTopWall(frame.x + frame.w, frame.y + frame.h);
+  return {
+    x: min(topLeft.x, bottomRight.x) - margin,
+    y: min(topLeft.y, bottomRight.y) - margin,
+    w: abs(bottomRight.x - topLeft.x) + margin * 2,
+    h: abs(bottomRight.y - topLeft.y) + margin * 2
+  };
+}
+
+function wallFieldItemVisible(item, visible) {
+  let left = item.x - item.size / 2;
+  let right = item.x + item.size / 2;
+  let top = item.y - item.size / 2;
+  let bottom = item.y + item.size / 2;
+  if (item.hasReflection) {
+    left = min(left, item.noteX - item.noteW / 2);
+    right = max(right, item.noteX + item.noteW / 2);
+    top = min(top, item.noteY - item.noteH / 2);
+    bottom = max(bottom, item.noteY + item.noteH / 2);
+  }
+  return (
+    right >= visible.x &&
+    left <= visible.x + visible.w &&
+    bottom >= visible.y &&
+    top <= visible.y + visible.h
+  );
+}
+
+function drawWallFieldApple(d, item) {
+  push();
+  translate(item.x, item.y);
+  rotate(item.rotation);
+
+  if (wallCamera.zoom >= 0.8) {
+    drawingContext.save();
+    drawingContext.shadowColor = "rgba(55, 47, 38, 0.10)";
+    drawingContext.shadowBlur = 9;
+    drawingContext.shadowOffsetY = 3;
+  }
+
+  if (item.cachedThumb) {
+    tint(255, 255 * item.alpha);
+    drawImageContained(
+      item.cachedThumb,
+      -item.size / 2,
+      -item.size / 2,
+      item.size,
+      item.size
+    );
+    noTint();
+  } else {
+    push();
+    translate(-item.size / 2, -item.size / 2);
+    drawMissingImagePlaceholder(item.size, item.size);
+    pop();
+  }
+
+  if (wallCamera.zoom >= 0.8) drawingContext.restore();
+
+  if (wallCamera.zoom >= 0.92) {
+    noStroke();
+    fill(91, 84, 77, 135);
+    textAlign(LEFT, TOP);
+    textSize(9);
+    text(`#${item.archiveIndex + 1}`, item.size * 0.38, item.size * 0.28);
+  }
+  pop();
+}
+
+function drawWallReflectionLabel(d, item) {
+  let colors = [
+    [247, 229, 170],
+    [244, 207, 204],
+    [215, 232, 198],
+    [221, 211, 235]
+  ];
+  let c = colors[item.noteColorIndex % colors.length];
+
+  if (wallCamera.zoom >= 0.8) {
+    stroke(112, 104, 94, 80);
+    strokeWeight(0.8);
+    drawingContext.setLineDash([3, 4]);
+    line(
+      item.x + (item.noteX > item.x ? item.size * 0.36 : -item.size * 0.36),
+      item.y,
+      item.noteX + (item.noteX > item.x ? -item.noteW / 2 : item.noteW / 2),
+      item.noteY
+    );
+    drawingContext.setLineDash([]);
+  }
+
+  drawingContext.save();
+  drawingContext.shadowColor = "rgba(52, 45, 38, 0.08)";
+  drawingContext.shadowBlur = 8;
+  drawingContext.shadowOffsetY = 3;
+  fill(c[0], c[1], c[2], 196);
+  stroke(105, 96, 86, 55);
+  strokeWeight(0.8);
+  rect(
+    item.noteX - item.noteW / 2,
+    item.noteY - item.noteH / 2,
+    item.noteW,
+    item.noteH,
+    4
+  );
+  drawingContext.restore();
+
+  noStroke();
+  fill(35, 32, 29, 210);
+  textAlign(LEFT, TOP);
+  textSize(10);
+  text(
+    item.reflection,
+    item.noteX - item.noteW / 2 + 10,
+    item.noteY - item.noteH / 2 + 10,
+    item.noteW - 20,
+    item.noteH - 27
+  );
+
+  fill(74, 68, 62, 135);
+  textSize(7.5);
+  text(
+    `#${item.archiveIndex + 1}`,
+    item.noteX - item.noteW / 2 + 10,
+    item.noteY + item.noteH / 2 - 13
+  );
+
+  noStroke();
+  fill(70, 66, 61, 155);
+  circle(item.noteX + item.noteW / 2 - 7, item.noteY - item.noteH / 2 + 7, 4);
+}
+
+function getWallFieldControlRects() {
+  let frame = getWallFieldViewport();
+  let size = isMobileScreen() ? 30 : 32;
+  let x = frame.x + (isMobileScreen() ? 12 : 20);
+  let y = isMobileScreen() ? 84 : 118;
+  let gap = 5;
+  return [
+    { id: "zoom-in", label: "+", x: x, y: y, w: size, h: size },
+    { id: "zoom-out", label: "-", x: x, y: y + (size + gap), w: size, h: size },
+    { id: "fit", label: "FIT", x: x, y: y + (size + gap) * 2, w: size, h: size },
+    { id: "help", label: "?", x: x, y: y + (size + gap) * 3, w: size, h: size }
+  ];
+}
+
+function drawWallFieldControls() {
+  let controls = getWallFieldControlRects();
+  for (let control of controls) {
+    drawingContext.save();
+    drawingContext.shadowColor = "rgba(52, 45, 38, 0.10)";
+    drawingContext.shadowBlur = 8;
+    drawingContext.shadowOffsetY = 2;
+    fill(252, 250, 245, 238);
+    stroke(120, 112, 103, 60);
+    strokeWeight(0.8);
+    rect(control.x, control.y, control.w, control.h, 5);
+    drawingContext.restore();
+
+    noStroke();
+    fill(61, 57, 52, 205);
+    textAlign(CENTER, CENTER);
+    textSize(control.id === "fit" ? 7.5 : 15);
+    text(control.label, control.x + control.w / 2, control.y + control.h / 2 + 1);
+  }
+
+  if (wallHelpVisible) {
+    let last = controls[controls.length - 1];
+    let boxX = last.x + last.w + 10;
+    let boxY = last.y - 8;
+    let boxW = isMobileScreen() ? 164 : 188;
+    let boxH = 66;
+    fill(252, 250, 245, 242);
+    stroke(120, 112, 103, 55);
+    rect(boxX, boxY, boxW, boxH, 6);
+    noStroke();
+    fill(55, 51, 47, 205);
+    textAlign(LEFT, TOP);
+    textSize(9.5);
+    text(
+      "Drag to explore\nScroll or pinch to zoom\nClick an apple to view its record",
+      boxX + 10,
+      boxY + 10,
+      boxW - 20,
+      boxH - 18
+    );
+  }
+}
+
+function getWallFieldMinimapRect() {
+  let frame = getWallFieldViewport();
+  let w = isMobileScreen() ? 104 : 154;
+  let h = isMobileScreen() ? 76 : 108;
+  return {
+    x: frame.x + frame.w - w - (isMobileScreen() ? 12 : 22),
+    y: frame.y + frame.h - h - (isMobileScreen() ? 18 : 22),
+    w: w,
+    h: h
+  };
+}
+
+function drawWallFieldMinimap() {
+  if (wallFieldLayout.length === 0) return;
+  let r = getWallFieldMinimapRect();
+  fill(252, 250, 245, 226);
+  stroke(120, 112, 103, 55);
+  strokeWeight(0.8);
+  rect(r.x, r.y, r.w, r.h, 6);
+
+  let pad = 8;
+  let mapX = r.x + pad;
+  let mapY = r.y + pad;
+  let mapW = r.w - pad * 2;
+  let mapH = r.h - pad * 2;
+  for (let item of wallFieldLayout) {
+    let px = map(
+      item.x,
+      wallWorldBounds.x,
+      wallWorldBounds.x + wallWorldBounds.w,
+      mapX,
+      mapX + mapW
+    );
+    let py = map(
+      item.y,
+      wallWorldBounds.y,
+      wallWorldBounds.y + wallWorldBounds.h,
+      mapY,
+      mapY + mapH
+    );
+    noStroke();
+    fill(item.hasReflection ? 218 : 200, item.hasReflection ? 142 : 74, item.hasReflection ? 132 : 65, 175);
+    circle(px, py, item.hasReflection ? 2.4 : 1.8);
+  }
+
+  let visible = getVisibleWallWorldRect();
+  let vx = map(visible.x, wallWorldBounds.x, wallWorldBounds.x + wallWorldBounds.w, mapX, mapX + mapW);
+  let vy = map(visible.y, wallWorldBounds.y, wallWorldBounds.y + wallWorldBounds.h, mapY, mapY + mapH);
+  let vw = visible.w / wallWorldBounds.w * mapW;
+  let vh = visible.h / wallWorldBounds.h * mapH;
+  noFill();
+  stroke(53, 50, 46, 145);
+  strokeWeight(0.8);
+  rect(vx, vy, vw, vh, 1);
+}
+
+function recenterWallCameraFromMinimap(screenX, screenY) {
+  let r = getWallFieldMinimapRect();
+  let pad = 8;
+  let worldX = map(
+    constrain(screenX, r.x + pad, r.x + r.w - pad),
+    r.x + pad,
+    r.x + r.w - pad,
+    wallWorldBounds.x,
+    wallWorldBounds.x + wallWorldBounds.w
+  );
+  let worldY = map(
+    constrain(screenY, r.y + pad, r.y + r.h - pad),
+    r.y + pad,
+    r.y + r.h - pad,
+    wallWorldBounds.y,
+    wallWorldBounds.y + wallWorldBounds.h
+  );
+  let frame = getWallFieldViewport();
+  wallCamera.x = frame.x + frame.w / 2 - worldX;
+  wallCamera.y = frame.y + frame.h / 2 - worldY;
+  wallCameraInitialized = true;
+  constrainTopWallCamera();
+  requestRender("wall-minimap");
+}
+
+function fitWallCameraToWorld() {
+  let frame = getWallFieldViewport();
+  let fitZoom = min(
+    frame.w / max(1, wallWorldBounds.w + 120),
+    frame.h / max(1, wallWorldBounds.h + 120)
+  ) * 0.96;
+  wallCamera.zoom = constrain(fitZoom, wallMinZoom, min(1, wallMaxZoom));
+  wallCamera.x = 0;
+  wallCamera.y = 0;
+  wallCameraInitialized = true;
+  constrainTopWallCamera();
+  requestRender("wall-fit");
+}
+
+function zoomTopWallCameraAt(screenX, screenY, zoomFactor) {
+  let before = screenToTopWall(screenX, screenY);
+  wallCamera.zoom = constrain(wallCamera.zoom * zoomFactor, wallMinZoom, wallMaxZoom);
+  let after = screenToTopWall(screenX, screenY);
+  wallCamera.x += after.x - before.x;
+  wallCamera.y += after.y - before.y;
+  wallCameraInitialized = true;
+  constrainTopWallCamera();
+}
+
+function constrainTopWallCamera() {
+  if (wallWorldBounds.w <= 1 || wallWorldBounds.h <= 1) return;
+  let frame = getWallFieldViewport();
+  let cx = frame.x + frame.w / 2;
+  let cy = frame.y + frame.h / 2;
+  let halfVisibleW = frame.w / (2 * wallCamera.zoom);
+  let halfVisibleH = frame.h / (2 * wallCamera.zoom);
+  let worldCenterX = wallWorldBounds.x + wallWorldBounds.w / 2;
+  let worldCenterY = wallWorldBounds.y + wallWorldBounds.h / 2;
+
+  if (halfVisibleW * 2 >= wallWorldBounds.w) {
+    wallCamera.x = cx - worldCenterX;
+  } else {
+    let visibleCenterX = constrain(
+      cx - wallCamera.x,
+      wallWorldBounds.x + halfVisibleW,
+      wallWorldBounds.x + wallWorldBounds.w - halfVisibleW
+    );
+    wallCamera.x = cx - visibleCenterX;
+  }
+
+  if (halfVisibleH * 2 >= wallWorldBounds.h) {
+    wallCamera.y = cy - worldCenterY;
+  } else {
+    let visibleCenterY = constrain(
+      cy - wallCamera.y,
+      wallWorldBounds.y + halfVisibleH,
+      wallWorldBounds.y + wallWorldBounds.h - halfVisibleH
+    );
+    wallCamera.y = cy - visibleCenterY;
+  }
+}
+
+function getWallFieldControlAt(x, y) {
+  if (!isTopWallMode()) return null;
+  for (let control of getWallFieldControlRects()) {
+    if (pointInsideRect(x, y, control)) return control.id;
+  }
+  return null;
+}
+
+function handleWallFieldControl(control) {
+  let frame = getWallFieldViewport();
+  let cx = frame.x + frame.w / 2;
+  let cy = frame.y + frame.h / 2;
+  if (control === "zoom-in") zoomTopWallCameraAt(cx, cy, 1.28);
+  if (control === "zoom-out") zoomTopWallCameraAt(cx, cy, 0.78);
+  if (control === "fit") fitWallCameraToWorld();
+  if (control === "help") wallHelpVisible = !wallHelpVisible;
+  requestRender("wall-control");
+}
+
+function getWallFieldItemAt(screenX, screenY) {
+  if (!isTopWallMode()) return -1;
+  let p = screenToTopWall(screenX, screenY);
+  for (let i = wallFieldLayout.length - 1; i >= 0; i--) {
+    let item = wallFieldLayout[i];
+    let appleHit = (
+      abs(p.x - item.x) <= item.size * 0.58 &&
+      abs(p.y - item.y) <= item.size * 0.58
+    );
+    let noteHit = item.hasReflection && wallCamera.zoom >= 0.5 && (
+      abs(p.x - item.noteX) <= item.noteW / 2 &&
+      abs(p.y - item.noteY) <= item.noteH / 2
+    );
+    if (appleHit || noteHit) return item.archiveIndex;
+  }
+  return -1;
+}
+
+function handleTopWallPress(x, y) {
+  if (!isTopWallMode()) return false;
+  let frame = getWallFieldViewport();
+  if (!pointInsideRect(x, y, frame)) return false;
+  if (
+    isClickOnSidebar(x, y) ||
+    isClickOnViewSwitcher(x, y) ||
+    isClickOnReopenDrawingButton(x, y) ||
+    getWallFieldControlAt(x, y) ||
+    pointInsideRect(x, y, getWallFieldMinimapRect())
+  ) {
+    return false;
+  }
+
+  isWallPanning = true;
+  lastWallPanPoint = { x: x, y: y };
+  wallPressPoint = { x: x, y: y };
+  wallDragDistance = 0;
+  return true;
 }
 
 
@@ -3546,6 +4096,10 @@ function handlePointerPressed(x, y) {
     return true;
   }
 
+  if (isTopWallMode() && handleTopWallPress(x, y)) {
+    return true;
+  }
+
   let archiveRow = getArchiveRowAt(x, y);
   if (archiveRow >= 0) {
     registerArchiveInteraction();
@@ -3615,14 +4169,16 @@ function handlePointerDragged(x, y) {
     return false;
   }
 
-  if (isWallPanning && page === "archiveWall") {
+  if (isWallPanning && (page === "archiveWall" || isTopWallMode())) {
     let dx = x - lastWallPanPoint.x;
     let dy = y - lastWallPanPoint.y;
     wallCamera.x += dx / wallCamera.zoom;
     wallCamera.y += dy / wallCamera.zoom;
     wallDragDistance += abs(dx) + abs(dy);
     lastWallPanPoint = { x: x, y: y };
-    constrainWallCamera();
+    if (isTopWallMode()) constrainTopWallCamera();
+    else constrainWallCamera();
+    requestRender("wall-drag");
     return false;
   }
 
@@ -3695,7 +4251,9 @@ function handlePointerReleased() {
 
   if (isWallPanning) {
     if (wallDragDistance < 8) {
-      let hitIndex = getArchiveWallAppleAt(wallPressPoint.x, wallPressPoint.y);
+      let hitIndex = isTopWallMode()
+        ? getWallFieldItemAt(wallPressPoint.x, wallPressPoint.y)
+        : getArchiveWallAppleAt(wallPressPoint.x, wallPressPoint.y);
       if (hitIndex >= 0) {
         selectArchiveDrawing(hitIndex);
       }
@@ -3790,7 +4348,10 @@ function handleDrawPageClick(x, y) {
     return true;
   }
 
-  if (backgroundViewMode === "archive" && isClickOnApplePopupClose(x, y)) {
+  if (
+    (backgroundViewMode === "archive" || backgroundViewMode === "wall") &&
+    isClickOnApplePopupClose(x, y)
+  ) {
     selectedApple = null;
     selectedAppleIndex = -1;
     archiveLastInteractionTime = millis();
@@ -3799,7 +4360,21 @@ function handleDrawPageClick(x, y) {
     return true;
   }
 
-  if (backgroundViewMode === "archive" && isClickOnApplePopup(x, y)) {
+  if (
+    (backgroundViewMode === "archive" || backgroundViewMode === "wall") &&
+    isClickOnApplePopup(x, y)
+  ) {
+    return true;
+  }
+
+  let wallControl = getWallFieldControlAt(x, y);
+  if (wallControl) {
+    handleWallFieldControl(wallControl);
+    return true;
+  }
+
+  if (isTopWallMode() && pointInsideRect(x, y, getWallFieldMinimapRect())) {
+    recenterWallCameraFromMinimap(x, y);
     return true;
   }
 
@@ -3831,7 +4406,7 @@ function handleDrawPageClick(x, y) {
         clearArchiveIdleTimer();
       }
       if (switchMode === "wall") {
-        generateDrawBackgroundApplesLayout();
+        generateWallMemoryFieldLayout();
       }
       if (switchMode === "average") {
         ensureAveragePromptCache(averagePromptIndex);
@@ -4129,6 +4704,16 @@ function mouseWheel(event) {
     zoomWallCameraAt(mouseX, mouseY, zoomFactor);
     requestRender("wall-wheel");
     return false;
+  }
+
+  if (isTopWallMode()) {
+    let frame = getWallFieldViewport();
+    if (pointInsideRect(mouseX, mouseY, frame) && !isClickOnViewSwitcher(mouseX, mouseY)) {
+      let zoomFactor = exp(-event.delta * 0.0016);
+      zoomTopWallCameraAt(mouseX, mouseY, zoomFactor);
+      requestRender("wall-wheel");
+      return false;
+    }
   }
 
   if (page === "draw" && !modalOpen && backgroundViewMode === "archive") {
@@ -5133,6 +5718,7 @@ function refreshArchiveViews() {
   calculateMaxLayerUnits();
   generateLayerLayout();
   generateDrawBackgroundApplesLayout();
+  generateWallMemoryFieldLayout();
   if (page === "stack") selectFirstAvailableStackPrompt();
   markStackDirty();
   resetArchiveIdleTimer();
@@ -6717,6 +7303,8 @@ function windowResized() {
   calculateMaxLayerUnits();
   generateLayerLayout();
   generateDrawBackgroundApplesLayout();
+  wallCameraInitialized = false;
+  generateWallMemoryFieldLayout();
   markStackDirty();
   resetArchiveIdleTimer();
   requestRender("window-resized");
