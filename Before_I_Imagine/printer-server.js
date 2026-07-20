@@ -325,7 +325,7 @@ async function createReportReceipt(payload) {
 function buildReceiptSvg(data) {
   const margin = 28;
   const parts = [];
-  let y = 30;
+  let y = 47;
 
   const text = (value, x, top, options = {}) => {
     parts.push(svgText(value, x, top, options));
@@ -368,47 +368,42 @@ function buildReceiptSvg(data) {
     size: 21,
     weight: 600
   });
-  y += 33;
+  y = 93;
   text("APPLE REPORT", RECEIPT_WIDTH / 2, y, {
     anchor: "middle",
     size: 21,
     weight: 600
   });
-  drawBinaryApple(parts, 327, 55);
-  y += 82;
+  drawBinaryApple(parts, 350, 80);
+  y = 190;
   text("A record of one drawing session.", RECEIPT_WIDTH / 2, y, {
     anchor: "middle",
     size: 13
   });
-  y += 27;
-  rule(y, true);
-  y += 15;
+  rule(221, true);
 
-  text("REPORT ID:", margin, y, { size: 14 });
-  text(`#${data.reportId}`, RECEIPT_WIDTH - margin, y - 2, {
+  text("REPORT ID:", margin, 235, { size: 14 });
+  text(`#${data.reportId}`, RECEIPT_WIDTH - margin, 230, {
     anchor: "end",
     size: 24
   });
-  y += 30;
-  text("DATE:", margin, y, { size: 14 });
-  text(data.date || "PENDING", RECEIPT_WIDTH - margin, y, {
+  text("DATE:", margin, 273, { size: 14 });
+  text(data.date || "PENDING", RECEIPT_WIDTH - margin, 273, {
     anchor: "end",
     size: 15
   });
-  y += 27;
-  rule(y, true);
-  y += 15;
-  text(`ARCHIVE ${formatAppleNumberRange(data.apples)}`, margin, y, {
+  rule(311, true);
+  text(`ARCHIVE ${formatAppleNumberRange(data.apples)}`, margin, 326, {
     size: 17,
     weight: 600
   });
-  y += 43;
+  y = 385;
 
-  const imageW = 142;
-  const imageH = 114;
-  const imageXs = [30, 212];
-  const imageRows = [y, y + 135];
-  drawCropMark(parts, RECEIPT_WIDTH - 70, y - 16, "top-right");
+  const imageW = 112;
+  const imageH = 100;
+  const imageXs = [56, 214];
+  const imageRows = [395, 550];
+  drawCropMark(parts, RECEIPT_WIDTH - 36, 338, "top-right");
   data.apples.forEach((apple, index) => {
     const imageX = imageXs[index % 2];
     const imageY = imageRows[Math.floor(index / 2)];
@@ -424,14 +419,13 @@ function buildReceiptSvg(data) {
       });
     }
   });
-  y += 275;
-  drawCropMark(parts, margin, y - 14, "bottom-left");
-  y += 16;
-  rule(y, true);
-  y += 17;
+  y = 706;
+  drawCropMark(parts, margin, 706, "bottom-left");
+  rule(735, true);
+  y = 754;
 
   text("REFLECTION", margin, y, { size: 15, weight: 600 });
-  y += 46;
+  y = 808;
   if (data.reflection) {
     const reflectionLines = wrapReceiptText(data.reflection, 32);
     text("'", RECEIPT_WIDTH / 2 - 112, y, { size: 15 });
@@ -446,7 +440,7 @@ function buildReceiptSvg(data) {
   } else {
     y += 20;
   }
-  y = Math.max(y + 34, 792);
+  y = Math.max(y + 52, 950);
   rule(y, true);
   y += 35;
   text("Thank you for contributing", RECEIPT_WIDTH / 2, y, {
@@ -458,18 +452,18 @@ function buildReceiptSvg(data) {
     anchor: "middle",
     size: 13
   });
-  y += 38;
+  y += 42;
   text("<before-i-imagine>", RECEIPT_WIDTH / 2, y, {
     anchor: "middle",
     size: 13,
     weight: 600
   });
-  y += 32;
+  y += 34;
   text("https://before-i-imagine.onrender.com/", RECEIPT_WIDTH / 2, y, {
     anchor: "middle",
     size: 10
   });
-  y += 35;
+  y += 42;
 
   return wrapSvg(parts, y);
 }
@@ -511,18 +505,77 @@ function svgText(value, x, y, options = {}) {
 
 async function prepareAppleImage(source) {
   const input = await loadImageSource(source);
-  const png = await sharp(input)
+  const { data, info } = await sharp(input)
     .flatten({ background: "#ffffff" })
-    .resize(142, 114, {
+    .grayscale()
+    .threshold(190)
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  const bounds = getInkBounds(data, info.width, info.height);
+  const png = await sharp(data, {
+    raw: { width: info.width, height: info.height, channels: 1 }
+  })
+    .extract(bounds)
+    .resize(112, 100, {
       fit: "contain",
       background: "#ffffff",
       withoutEnlargement: false
     })
-    .grayscale()
-    .threshold(178)
     .png()
     .toBuffer();
   return `data:image/png;base64,${png.toString("base64")}`;
+}
+
+function getInkBounds(pixels, width, height) {
+  const xCounts = new Uint32Array(width);
+  const yCounts = new Uint32Array(height);
+  let inkCount = 0;
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      if (pixels[y * width + x] < 128) {
+        xCounts[x]++;
+        yCounts[y]++;
+        inkCount++;
+      }
+    }
+  }
+  if (inkCount < 12) return { left: 0, top: 0, width, height };
+
+  const percentile = Math.max(1, Math.floor(inkCount * 0.01));
+  const left = findHistogramEdge(xCounts, percentile, false);
+  const right = findHistogramEdge(xCounts, percentile, true);
+  const top = findHistogramEdge(yCounts, percentile, false);
+  const bottom = findHistogramEdge(yCounts, percentile, true);
+  const contentW = Math.max(1, right - left + 1);
+  const contentH = Math.max(1, bottom - top + 1);
+  const padX = Math.max(4, Math.round(contentW * 0.09));
+  const padY = Math.max(4, Math.round(contentH * 0.09));
+  const cropLeft = Math.max(0, left - padX);
+  const cropTop = Math.max(0, top - padY);
+  const cropRight = Math.min(width - 1, right + padX);
+  const cropBottom = Math.min(height - 1, bottom + padY);
+  return {
+    left: cropLeft,
+    top: cropTop,
+    width: cropRight - cropLeft + 1,
+    height: cropBottom - cropTop + 1
+  };
+}
+
+function findHistogramEdge(histogram, target, reverse) {
+  let total = 0;
+  if (reverse) {
+    for (let index = histogram.length - 1; index >= 0; index--) {
+      total += histogram[index];
+      if (total >= target) return index;
+    }
+    return histogram.length - 1;
+  }
+  for (let index = 0; index < histogram.length; index++) {
+    total += histogram[index];
+    if (total >= target) return index;
+  }
+  return 0;
 }
 
 function normalizeAppleNumber(value) {
