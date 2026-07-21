@@ -2452,9 +2452,11 @@ function generateWallMemoryFieldLayout() {
 
 function getWallFieldFloatOffset(item) {
   let t = millis() * (item.floatSpeed || 0.0002) + (item.floatPhase || 0);
+  // Keep the drift subtle but visible at every camera zoom level.
+  let zoom = max(0.01, wallCamera.zoom || 1);
   return {
-    x: sin(t) * (item.floatDriftX || 0),
-    y: cos(t * 0.83) * (item.floatDriftY || 0)
+    x: sin(t) * (item.floatDriftX || 0) / zoom,
+    y: cos(t * 0.83) * (item.floatDriftY || 0) / zoom
   };
 }
 
