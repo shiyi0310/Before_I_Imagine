@@ -506,13 +506,33 @@ function svgText(value, x, y, options = {}) {
 async function prepareAppleImage(source) {
   const input = await loadImageSource(source);
   const { data, info } = await sharp(input)
-    .flatten({ background: "#ffffff" })
-    .grayscale()
-    .threshold(190)
+    .ensureAlpha()
     .raw()
     .toBuffer({ resolveWithObject: true });
-  const bounds = getInkBounds(data, info.width, info.height);
-  const png = await sharp(data, {
+
+  // The thermal printer is monochrome. Treat every visible, non-background
+  // drawing pixel as black so bright colours such as neon green do not vanish
+  // during luminance-based grayscale conversion.
+  const inkMask = Buffer.alloc(info.width * info.height, 255);
+  for (let pixel = 0; pixel < info.width * info.height; pixel++) {
+    const sourceIndex = pixel * info.channels;
+    const red = data[sourceIndex];
+    const green = data[sourceIndex + 1];
+    const blue = data[sourceIndex + 2];
+    const alpha = data[sourceIndex + 3];
+    const distanceFromWhite = Math.max(
+      255 - red,
+      255 - green,
+      255 - blue
+    );
+
+    if (alpha > 16 && distanceFromWhite > 20) {
+      inkMask[pixel] = 0;
+    }
+  }
+
+  const bounds = getInkBounds(inkMask, info.width, info.height);
+  const png = await sharp(inkMask, {
     raw: { width: info.width, height: info.height, channels: 1 }
   })
     .extract(bounds)
