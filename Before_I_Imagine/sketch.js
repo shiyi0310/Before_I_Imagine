@@ -2439,9 +2439,9 @@ function generateWallMemoryFieldLayout() {
       noteLineHeight: noteMetrics.lineHeight,
       noteColorIndex: floor(wallStableValue(d, i, 8) * 4),
       floatPhase: wallStableValue(d, i, 9) * TWO_PI,
-      floatSpeed: lerp(0.00016, 0.00028, wallStableValue(d, i, 10)),
-      floatDriftX: lerp(1.5, 3.8, wallStableValue(d, i, 11)),
-      floatDriftY: lerp(2, 4.5, wallStableValue(d, i, 12)),
+      floatSpeed: lerp(0.00022, 0.00038, wallStableValue(d, i, 10)),
+      floatDriftX: lerp(2.5, 5.5, wallStableValue(d, i, 11)),
+      floatDriftY: lerp(3, 6.5, wallStableValue(d, i, 12)),
       cachedThumb: null
     });
   }
