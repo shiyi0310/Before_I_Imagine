@@ -2544,13 +2544,37 @@ function getWallFieldItemScreenPose(item, floatOffset = { x: 0, y: 0 }) {
   let zoomPower = lerp(1.08, 0.84, depthT);
   let effectiveZoom = pow(max(0.01, wallCamera.zoom), zoomPower);
   let depthScale = 1 / depth;
+  let visibility = getWallDepthLayerVisibility(item.depthLayer || 0, wallCamera.zoom);
   let worldX = item.x + floatOffset.x;
   let worldY = item.y + floatOffset.y;
   return {
     x: cx + (worldX - cx + wallCamera.x) * effectiveZoom * parallax,
     y: cy + (worldY - cy + wallCamera.y) * effectiveZoom * parallax,
-    scale: effectiveZoom * depthScale
+    scale: effectiveZoom * depthScale,
+    visibility: visibility
   };
+}
+
+function wallSmoothstep(edge0, edge1, value) {
+  let t = constrain((value - edge0) / max(0.0001, edge1 - edge0), 0, 1);
+  return t * t * (3 - 2 * t);
+}
+
+function getWallDepthLayerVisibility(depthLayer, zoom) {
+  // At overview scale all planes can be read together. Zooming then moves the
+  // viewer through three explicit planes instead of enlarging every plane at once.
+  let overview = 1 - wallSmoothstep(0.42, 0.72, zoom);
+  if (depthLayer === 0) {
+    let foreground = 1 - wallSmoothstep(0.95, 1.38, zoom);
+    return max(overview, foreground);
+  }
+  if (depthLayer === 1) {
+    let enter = wallSmoothstep(0.62, 0.96, zoom);
+    let leave = 1 - wallSmoothstep(1.5, 1.98, zoom);
+    return max(overview * 0.78, enter * leave);
+  }
+  let background = wallSmoothstep(1.28, 1.82, zoom);
+  return max(overview * 0.56, background);
 }
 
 function getWallFieldFloatOffset(item) {
@@ -2583,13 +2607,20 @@ function drawWallMemoryField() {
 
     let floatOffset = getWallFieldFloatOffset(item);
     let pose = getWallFieldItemScreenPose(item, floatOffset);
+    if (pose.visibility < 0.015) continue;
     if (!wallFieldItemVisibleOnScreen(item, pose, frame)) continue;
     push();
+    drawingContext.globalAlpha *= pose.visibility;
     translate(pose.x, pose.y);
     scale(pose.scale);
     translate(-item.x, -item.y);
     drawWallFieldApple(d, item);
-    if (item.hasReflection && item.depthLayer === 0 && wallCamera.zoom >= 0.5) {
+    if (
+      item.hasReflection &&
+      item.depthLayer === 0 &&
+      wallCamera.zoom >= 0.5 &&
+      pose.visibility > 0.08
+    ) {
       drawWallReflectionLabel(d, item);
     }
     pop();
@@ -2985,6 +3016,7 @@ function getWallFieldItemAt(screenX, screenY) {
   for (let item of hitOrder) {
     let floatOffset = getWallFieldFloatOffset(item);
     let pose = getWallFieldItemScreenPose(item, floatOffset);
+    if (pose.visibility < 0.12) continue;
     let scaleValue = max(0.01, pose.scale);
     let noteX = pose.x + (item.noteX - item.x) * scaleValue;
     let noteY = pose.y + (item.noteY - item.y) * scaleValue;
