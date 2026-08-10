@@ -2366,14 +2366,9 @@ function generateWallMemoryFieldLayout() {
     let groupGap = mobile ? 12 : 18;
     let depthSeed = wallStableValue(d, i, 13);
     let depthLayer = hasReflection ? 0 : (depthSeed < 0.2 ? 0 : (depthSeed < 0.58 ? 1 : 2));
-    let depthRanges = mobile
-      ? [[0.88, 1.04], [1.22, 1.5], [1.72, 2.18]]
-      : [[0.8, 1.02], [1.2, 1.55], [1.72, 2.32]];
-    let depth = lerp(
-      depthRanges[depthLayer][0],
-      depthRanges[depthLayer][1],
-      wallStableValue(d, i, 14)
-    );
+    // Every item in a plane shares one depth transform. This keeps records in
+    // the same readable layer from drifting into each other while zooming.
+    let depth = (mobile ? [0.94, 1.38, 1.96] : [0.9, 1.4, 2.05])[depthLayer];
     return {
       d: d,
       archiveIndex: i,
@@ -2430,8 +2425,8 @@ function generateWallMemoryFieldLayout() {
     let depthScale = 1 / itemData.depth;
     let depthT = constrain(map(itemData.depth, 0.8, 2.32, 0, 1), 0, 1);
     let parallax = lerp(1.03, 0.56, depthT);
-    let projectedW = itemData.groupW * depthScale + (mobile ? 18 : 28);
-    let projectedH = itemData.groupH * depthScale + (mobile ? 16 : 24);
+    let projectedW = itemData.groupW * depthScale + (mobile ? 34 : 52);
+    let projectedH = itemData.groupH * depthScale + (mobile ? 30 : 44);
     let groupX = centerX;
     let groupY = centerY;
     let chosenBox = null;
@@ -2455,9 +2450,10 @@ function generateWallMemoryFieldLayout() {
         left: projectedX - projectedW / 2,
         right: projectedX + projectedW / 2,
         top: projectedY - projectedH / 2,
-        bottom: projectedY + projectedH / 2
+        bottom: projectedY + projectedH / 2,
+        depthLayer: itemData.depthLayer
       };
-      let collides = occupied.some(box => !(
+      let collides = occupied.some(box => box.depthLayer === itemData.depthLayer && !(
         candidateBox.right < box.left ||
         candidateBox.left > box.right ||
         candidateBox.bottom < box.top ||
@@ -2472,19 +2468,61 @@ function generateWallMemoryFieldLayout() {
     }
 
     if (!chosenBox) {
-      // Dense archives retain a stable loose grid only as an emergency fallback.
-      let column = placementIndex % columns;
-      let row = floor(placementIndex / columns);
-      groupX = centerX - worldW / 2 + cellW / 2 + column * cellW;
-      groupY = centerY - worldH / 2 + cellH / 2 + row * cellH;
+      // Dense archives scan stable fallback slots, but still reject occupied
+      // slots in the same plane instead of accepting an overlap.
+      let slotCount = columns * rows;
+      let startSlot = floor(wallStableValue(d, i, 700) * slotCount);
+      for (let slotOffset = 0; slotOffset < slotCount; slotOffset++) {
+        let slot = (startSlot + slotOffset) % slotCount;
+        let column = slot % columns;
+        let row = floor(slot / columns);
+        let candidateX = centerX - worldW / 2 + cellW / 2 + column * cellW;
+        let candidateY = centerY - worldH / 2 + cellH / 2 + row * cellH;
+        let projectedX = centerX + (candidateX - centerX) * parallax;
+        let projectedY = centerY + (candidateY - centerY) * parallax;
+        let candidateBox = {
+          left: projectedX - projectedW / 2,
+          right: projectedX + projectedW / 2,
+          top: projectedY - projectedH / 2,
+          bottom: projectedY + projectedH / 2,
+          depthLayer: itemData.depthLayer
+        };
+        let collides = occupied.some(box => box.depthLayer === itemData.depthLayer && !(
+          candidateBox.right < box.left ||
+          candidateBox.left > box.right ||
+          candidateBox.bottom < box.top ||
+          candidateBox.top > box.bottom
+        ));
+        if (!collides) {
+          groupX = candidateX;
+          groupY = candidateY;
+          chosenBox = candidateBox;
+          break;
+        }
+      }
+    }
+
+    if (!chosenBox) {
+      // This should only occur in an unusually dense layer. Keep the record
+      // discoverable in a deterministic overflow lane rather than stacking it.
+      let sameLayerCount = occupied.filter(box => box.depthLayer === itemData.depthLayer).length;
+      let projectedStep = projectedW + (mobile ? 24 : 38);
+      let groupStep = projectedStep / max(0.2, parallax);
+      groupX = wallWorldBounds.x + wallWorldBounds.w + itemData.groupW + sameLayerCount * groupStep;
+      groupY = centerY + (itemData.depthLayer - 1) * cellH;
       let projectedX = centerX + (groupX - centerX) * parallax;
       let projectedY = centerY + (groupY - centerY) * parallax;
       chosenBox = {
         left: projectedX - projectedW / 2,
         right: projectedX + projectedW / 2,
         top: projectedY - projectedH / 2,
-        bottom: projectedY + projectedH / 2
+        bottom: projectedY + projectedH / 2,
+        depthLayer: itemData.depthLayer
       };
+      wallWorldBounds.w = max(
+        wallWorldBounds.w,
+        groupX + itemData.groupW / 2 - wallWorldBounds.x + 80
+      );
     }
     occupied.push(chosenBox);
 
@@ -2500,6 +2538,8 @@ function generateWallMemoryFieldLayout() {
     let depthAlphaRanges = [[0.88, 0.98], [0.64, 0.82], [0.34, 0.58]];
     positionedItems[i] = {
       archiveIndex: i,
+      groupX: groupX,
+      groupY: groupY,
       x: x,
       y: y,
       size: appleSize,
@@ -2545,11 +2585,15 @@ function getWallFieldItemScreenPose(item, floatOffset = { x: 0, y: 0 }) {
   let effectiveZoom = pow(max(0.01, wallCamera.zoom), zoomPower);
   let depthScale = 1 / depth;
   let visibility = getWallDepthLayerVisibility(item.depthLayer || 0, wallCamera.zoom);
-  let worldX = item.x + floatOffset.x;
-  let worldY = item.y + floatOffset.y;
+  let groupX = item.groupX === undefined ? item.x : item.groupX;
+  let groupY = item.groupY === undefined ? item.y : item.groupY;
+  let worldGroupX = groupX + floatOffset.x;
+  let worldGroupY = groupY + floatOffset.y;
+  let screenGroupX = cx + (worldGroupX - cx + wallCamera.x) * effectiveZoom * parallax;
+  let screenGroupY = cy + (worldGroupY - cy + wallCamera.y) * effectiveZoom * parallax;
   return {
-    x: cx + (worldX - cx + wallCamera.x) * effectiveZoom * parallax,
-    y: cy + (worldY - cy + wallCamera.y) * effectiveZoom * parallax,
+    x: screenGroupX + (item.x - groupX) * effectiveZoom * depthScale,
+    y: screenGroupY + (item.y - groupY) * effectiveZoom * depthScale,
     scale: effectiveZoom * depthScale,
     visibility: visibility
   };
