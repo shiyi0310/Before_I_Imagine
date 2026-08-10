@@ -150,6 +150,7 @@ let archiveReplayKey = "";
 let archiveReplayLoading = {};
 let archiveReplayMiniBuffer = null;
 let archiveReplayMiniBufferSize = { w: 0, h: 0 };
+let replaySimplifiedDrawingCache = new WeakMap();
 const ARCHIVE_IDLE_DELAY = 25000;
 const ENABLE_ARCHIVE_IDLE_AUTOPLAY = true;
 let archiveMode = "explore";
@@ -2363,6 +2364,16 @@ function generateWallMemoryFieldLayout() {
     let noteMetrics = getWallReflectionLabelMetrics(reflection, mobile);
     let appleSize = lerp(mobile ? 42 : 48, mobile ? 66 : 82, wallStableValue(d, i, 1));
     let groupGap = mobile ? 12 : 18;
+    let depthSeed = wallStableValue(d, i, 13);
+    let depthLayer = hasReflection ? 0 : (depthSeed < 0.2 ? 0 : (depthSeed < 0.58 ? 1 : 2));
+    let depthRanges = mobile
+      ? [[0.88, 1.04], [1.22, 1.5], [1.72, 2.18]]
+      : [[0.8, 1.02], [1.2, 1.55], [1.72, 2.32]];
+    let depth = lerp(
+      depthRanges[depthLayer][0],
+      depthRanges[depthLayer][1],
+      wallStableValue(d, i, 14)
+    );
     return {
       d: d,
       archiveIndex: i,
@@ -2372,7 +2383,10 @@ function generateWallMemoryFieldLayout() {
       appleSize: appleSize,
       groupGap: groupGap,
       groupW: hasReflection ? appleSize + groupGap + noteMetrics.w : appleSize,
-      groupH: hasReflection ? max(appleSize, noteMetrics.h) : appleSize
+      groupH: hasReflection ? max(appleSize, noteMetrics.h) : appleSize,
+      noteSide: wallStableValue(d, i, 4) > 0.5 ? 1 : -1,
+      depthLayer: depthLayer,
+      depth: depth
     };
   });
   let maxGroupW = max(items.map(item => item.groupW));
@@ -2385,8 +2399,6 @@ function generateWallMemoryFieldLayout() {
   let worldH = max(frame.h * (mobile ? 2.0 : 1.65), rows * cellH);
   let centerX = frame.x + frame.w / 2;
   let centerY = frame.y + frame.h / 2;
-  let startX = centerX - worldW / 2 + cellW / 2;
-  let startY = centerY - worldH / 2 + cellH / 2;
 
   wallWorldBounds = {
     x: centerX - worldW / 2,
@@ -2395,24 +2407,87 @@ function generateWallMemoryFieldLayout() {
     h: worldH
   };
 
-  for (let itemData of items) {
+  // Place reflection records first, then fill the remaining space with apples.
+  // The collision boxes use their projected depth size so the overview stays airy.
+  let positionedItems = new Array(count);
+  let occupied = [];
+  let placementOrder = items.slice().sort((a, b) => {
+    if (a.hasReflection !== b.hasReflection) return a.hasReflection ? -1 : 1;
+    return a.depthLayer - b.depthLayer;
+  });
+
+  for (let placementIndex = 0; placementIndex < placementOrder.length; placementIndex++) {
+    let itemData = placementOrder[placementIndex];
     let i = itemData.archiveIndex;
     let d = itemData.d;
-    let column = i % columns;
-    let row = floor(i / columns);
     let reflection = itemData.reflection;
     let hasReflection = itemData.hasReflection;
     let noteMetrics = itemData.noteMetrics;
     let appleSize = itemData.appleSize;
     let noteW = noteMetrics.w;
     let noteH = noteMetrics.h;
-    let noteSide = wallStableValue(d, i, 4) > 0.5 ? 1 : -1;
-    let freeX = max(0, (cellW - itemData.groupW) / 2 - 10);
-    let freeY = max(0, (cellH - itemData.groupH) / 2 - 10);
-    let jitterX = lerp(-min(18, freeX), min(18, freeX), wallStableValue(d, i, 2));
-    let jitterY = lerp(-min(15, freeY), min(15, freeY), wallStableValue(d, i, 3));
-    let groupX = startX + column * cellW + jitterX;
-    let groupY = startY + row * cellH + jitterY;
+    let noteSide = itemData.noteSide;
+    let depthScale = 1 / itemData.depth;
+    let depthT = constrain(map(itemData.depth, 0.8, 2.32, 0, 1), 0, 1);
+    let parallax = lerp(1.03, 0.56, depthT);
+    let projectedW = itemData.groupW * depthScale + (mobile ? 18 : 28);
+    let projectedH = itemData.groupH * depthScale + (mobile ? 16 : 24);
+    let groupX = centerX;
+    let groupY = centerY;
+    let chosenBox = null;
+
+    for (let attempt = 0; attempt < 220; attempt++) {
+      let edgePadX = itemData.groupW / 2 + (mobile ? 24 : 38);
+      let edgePadY = itemData.groupH / 2 + (mobile ? 24 : 34);
+      let candidateX = lerp(
+        wallWorldBounds.x + edgePadX,
+        wallWorldBounds.x + wallWorldBounds.w - edgePadX,
+        wallStableValue(d, i, 100 + attempt * 2)
+      );
+      let candidateY = lerp(
+        wallWorldBounds.y + edgePadY,
+        wallWorldBounds.y + wallWorldBounds.h - edgePadY,
+        wallStableValue(d, i, 101 + attempt * 2)
+      );
+      let projectedX = centerX + (candidateX - centerX) * parallax;
+      let projectedY = centerY + (candidateY - centerY) * parallax;
+      let candidateBox = {
+        left: projectedX - projectedW / 2,
+        right: projectedX + projectedW / 2,
+        top: projectedY - projectedH / 2,
+        bottom: projectedY + projectedH / 2
+      };
+      let collides = occupied.some(box => !(
+        candidateBox.right < box.left ||
+        candidateBox.left > box.right ||
+        candidateBox.bottom < box.top ||
+        candidateBox.top > box.bottom
+      ));
+      if (!collides) {
+        groupX = candidateX;
+        groupY = candidateY;
+        chosenBox = candidateBox;
+        break;
+      }
+    }
+
+    if (!chosenBox) {
+      // Dense archives retain a stable loose grid only as an emergency fallback.
+      let column = placementIndex % columns;
+      let row = floor(placementIndex / columns);
+      groupX = centerX - worldW / 2 + cellW / 2 + column * cellW;
+      groupY = centerY - worldH / 2 + cellH / 2 + row * cellH;
+      let projectedX = centerX + (groupX - centerX) * parallax;
+      let projectedY = centerY + (groupY - centerY) * parallax;
+      chosenBox = {
+        left: projectedX - projectedW / 2,
+        right: projectedX + projectedW / 2,
+        top: projectedY - projectedH / 2,
+        bottom: projectedY + projectedH / 2
+      };
+    }
+    occupied.push(chosenBox);
+
     let x = hasReflection
       ? groupX - noteSide * (noteW + itemData.groupGap) / 2
       : groupX;
@@ -2422,13 +2497,20 @@ function generateWallMemoryFieldLayout() {
       : groupX;
     let noteY = groupY;
 
-    wallFieldLayout.push({
+    let depthAlphaRanges = [[0.88, 0.98], [0.64, 0.82], [0.34, 0.58]];
+    positionedItems[i] = {
       archiveIndex: i,
       x: x,
       y: y,
       size: appleSize,
-      alpha: lerp(0.76, 0.98, wallStableValue(d, i, 6)),
+      alpha: lerp(
+        depthAlphaRanges[itemData.depthLayer][0],
+        depthAlphaRanges[itemData.depthLayer][1],
+        wallStableValue(d, i, 6)
+      ),
       rotation: lerp(-0.035, 0.035, wallStableValue(d, i, 7)),
+      depth: itemData.depth,
+      depthLayer: itemData.depthLayer,
       hasReflection: hasReflection,
       reflection: reflection,
       noteX: noteX,
@@ -2443,11 +2525,32 @@ function generateWallMemoryFieldLayout() {
       floatDriftX: lerp(5, 8, wallStableValue(d, i, 11)),
       floatDriftY: lerp(6, 10, wallStableValue(d, i, 12)),
       cachedThumb: null
-    });
+    };
   }
+
+  wallFieldLayout = positionedItems.filter(Boolean);
 
   if (!wallCameraInitialized) fitWallCameraToWorld();
   else constrainTopWallCamera();
+}
+
+function getWallFieldItemScreenPose(item, floatOffset = { x: 0, y: 0 }) {
+  let frame = getWallFieldViewport();
+  let cx = frame.x + frame.w / 2;
+  let cy = frame.y + frame.h / 2;
+  let depth = item.depth || 1;
+  let depthT = constrain(map(depth, 0.8, 2.32, 0, 1), 0, 1);
+  let parallax = lerp(1.03, 0.56, depthT);
+  let zoomPower = lerp(1.08, 0.84, depthT);
+  let effectiveZoom = pow(max(0.01, wallCamera.zoom), zoomPower);
+  let depthScale = 1 / depth;
+  let worldX = item.x + floatOffset.x;
+  let worldY = item.y + floatOffset.y;
+  return {
+    x: cx + (worldX - cx + wallCamera.x) * effectiveZoom * parallax,
+    y: cy + (worldY - cy + wallCamera.y) * effectiveZoom * parallax,
+    scale: effectiveZoom * depthScale
+  };
 }
 
 function getWallFieldFloatOffset(item) {
@@ -2466,12 +2569,10 @@ function drawWallMemoryField() {
 
   let frame = getWallFieldViewport();
   clipRect(frame.x, frame.y, frame.w, frame.h);
-  push();
-  applyTopWallCameraTransform();
-
-  let visible = getVisibleWallWorldRect(110);
-  for (let item of wallFieldLayout) {
-    if (!wallFieldItemVisible(item, visible)) continue;
+  // Render back-to-front. Each depth plane has its own scale and parallax,
+  // producing a quiet camera-through-layers effect without a WebGL scene.
+  let renderItems = wallFieldLayout.slice().sort((a, b) => (b.depth || 1) - (a.depth || 1));
+  for (let item of renderItems) {
     let d = archive[item.archiveIndex];
     if (!d) continue;
 
@@ -2481,16 +2582,19 @@ function drawWallMemoryField() {
     }
 
     let floatOffset = getWallFieldFloatOffset(item);
+    let pose = getWallFieldItemScreenPose(item, floatOffset);
+    if (!wallFieldItemVisibleOnScreen(item, pose, frame)) continue;
     push();
-    translate(floatOffset.x, floatOffset.y);
+    translate(pose.x, pose.y);
+    scale(pose.scale);
+    translate(-item.x, -item.y);
     drawWallFieldApple(d, item);
-    if (item.hasReflection && wallCamera.zoom >= 0.5) {
+    if (item.hasReflection && item.depthLayer === 0 && wallCamera.zoom >= 0.5) {
       drawWallReflectionLabel(d, item);
     }
     pop();
   }
 
-  pop();
   unclip();
 
   if (!modalOpen) {
@@ -2530,22 +2634,25 @@ function getVisibleWallWorldRect(margin = 0) {
   };
 }
 
-function wallFieldItemVisible(item, visible) {
-  let left = item.x - item.size / 2;
-  let right = item.x + item.size / 2;
-  let top = item.y - item.size / 2;
-  let bottom = item.y + item.size / 2;
-  if (item.hasReflection) {
-    left = min(left, item.noteX - item.noteW / 2);
-    right = max(right, item.noteX + item.noteW / 2);
-    top = min(top, item.noteY - item.noteH / 2);
-    bottom = max(bottom, item.noteY + item.noteH / 2);
+function wallFieldItemVisibleOnScreen(item, pose, frame) {
+  let scaleValue = max(0.01, pose.scale);
+  let left = pose.x - item.size * scaleValue / 2;
+  let right = pose.x + item.size * scaleValue / 2;
+  let top = pose.y - item.size * scaleValue / 2;
+  let bottom = pose.y + item.size * scaleValue / 2;
+  if (item.hasReflection && item.depthLayer === 0 && wallCamera.zoom >= 0.5) {
+    let noteX = pose.x + (item.noteX - item.x) * scaleValue;
+    let noteY = pose.y + (item.noteY - item.y) * scaleValue;
+    left = min(left, noteX - item.noteW * scaleValue / 2);
+    right = max(right, noteX + item.noteW * scaleValue / 2);
+    top = min(top, noteY - item.noteH * scaleValue / 2);
+    bottom = max(bottom, noteY + item.noteH * scaleValue / 2);
   }
   return (
-    right >= visible.x &&
-    left <= visible.x + visible.w &&
-    bottom >= visible.y &&
-    top <= visible.y + visible.h
+    right >= frame.x - 30 &&
+    left <= frame.x + frame.w + 30 &&
+    bottom >= frame.y - 30 &&
+    top <= frame.y + frame.h + 30
   );
 }
 
@@ -2554,7 +2661,7 @@ function drawWallFieldApple(d, item) {
   translate(item.x, item.y);
   rotate(item.rotation);
 
-  if (wallCamera.zoom >= 0.8) {
+  if (wallCamera.zoom >= 0.8 && item.depthLayer === 0) {
     drawingContext.save();
     drawingContext.shadowColor = "rgba(55, 47, 38, 0.10)";
     drawingContext.shadowBlur = 9;
@@ -2578,9 +2685,9 @@ function drawWallFieldApple(d, item) {
     pop();
   }
 
-  if (wallCamera.zoom >= 0.8) drawingContext.restore();
+  if (wallCamera.zoom >= 0.8 && item.depthLayer === 0) drawingContext.restore();
 
-  if (wallCamera.zoom >= 0.92) {
+  if (wallCamera.zoom >= 0.92 && item.depthLayer !== 2) {
     noStroke();
     fill(91, 84, 77, 135);
     textAlign(LEFT, TOP);
@@ -2874,21 +2981,20 @@ function handleWallFieldControl(control) {
 
 function getWallFieldItemAt(screenX, screenY) {
   if (!isTopWallMode()) return -1;
-  let p = screenToTopWall(screenX, screenY);
-  for (let i = wallFieldLayout.length - 1; i >= 0; i--) {
-    let item = wallFieldLayout[i];
+  let hitOrder = wallFieldLayout.slice().sort((a, b) => (a.depth || 1) - (b.depth || 1));
+  for (let item of hitOrder) {
     let floatOffset = getWallFieldFloatOffset(item);
-    let itemX = item.x + floatOffset.x;
-    let itemY = item.y + floatOffset.y;
-    let noteX = item.noteX + floatOffset.x;
-    let noteY = item.noteY + floatOffset.y;
+    let pose = getWallFieldItemScreenPose(item, floatOffset);
+    let scaleValue = max(0.01, pose.scale);
+    let noteX = pose.x + (item.noteX - item.x) * scaleValue;
+    let noteY = pose.y + (item.noteY - item.y) * scaleValue;
     let appleHit = (
-      abs(p.x - itemX) <= item.size * 0.58 &&
-      abs(p.y - itemY) <= item.size * 0.58
+      abs(screenX - pose.x) <= item.size * 0.58 * scaleValue &&
+      abs(screenY - pose.y) <= item.size * 0.58 * scaleValue
     );
-    let noteHit = item.hasReflection && wallCamera.zoom >= 0.5 && (
-      abs(p.x - noteX) <= item.noteW / 2 &&
-      abs(p.y - noteY) <= item.noteH / 2
+    let noteHit = item.hasReflection && item.depthLayer === 0 && wallCamera.zoom >= 0.5 && (
+      abs(screenX - noteX) <= item.noteW * scaleValue / 2 &&
+      abs(screenY - noteY) <= item.noteH * scaleValue / 2
     );
     if (appleHit || noteHit) return item.archiveIndex;
   }
@@ -6872,6 +6978,95 @@ function countDrawingUnits(d) {
   return count;
 }
 
+function getSimplifiedReplayInfo(d) {
+  if (!d || typeof d !== "object") {
+    return { drawing: d, originalUnits: 0, simplifiedUnits: 0 };
+  }
+
+  let cached = replaySimplifiedDrawingCache.get(d);
+  if (cached && cached.sourceActions === d.actions) return cached;
+
+  let sourceActions = Array.isArray(d.actions) ? d.actions : [];
+  let sourceW = max(1, Number(d.canvasWidth) || Number(d.width) || 800);
+  let sourceH = max(1, Number(d.canvasHeight) || Number(d.height) || 800);
+  // Roughly matches Quick, Draw!'s 256px-normalized simplification strength.
+  let epsilon = max(1.25, max(sourceW, sourceH) / 256 * 1.7);
+  let simplifiedActions = sourceActions.map(action => {
+    if (!action || action.type !== "stroke" || !Array.isArray(action.points)) {
+      return action;
+    }
+
+    return {
+      ...action,
+      points: simplifyReplayStrokePoints(action.points, epsilon)
+    };
+  });
+  let simplifiedDrawing = { ...d, actions: simplifiedActions };
+  let info = {
+    drawing: simplifiedDrawing,
+    originalUnits: countDrawingUnits(d),
+    simplifiedUnits: countDrawingUnits(simplifiedDrawing),
+    sourceActions
+  };
+  replaySimplifiedDrawingCache.set(d, info);
+  return info;
+}
+
+function simplifyReplayStrokePoints(points, epsilon) {
+  if (!Array.isArray(points) || points.length <= 2) return points || [];
+  let epsilonSq = epsilon * epsilon;
+  let keep = new Uint8Array(points.length);
+  keep[0] = 1;
+  keep[points.length - 1] = 1;
+  let ranges = [[0, points.length - 1]];
+
+  while (ranges.length) {
+    let range = ranges.pop();
+    let start = range[0];
+    let end = range[1];
+    let maxDistanceSq = 0;
+    let splitIndex = -1;
+
+    for (let i = start + 1; i < end; i++) {
+      let distanceSq = replayPointSegmentDistanceSq(points[i], points[start], points[end]);
+      if (distanceSq > maxDistanceSq) {
+        maxDistanceSq = distanceSq;
+        splitIndex = i;
+      }
+    }
+
+    if (splitIndex >= 0 && maxDistanceSq > epsilonSq) {
+      keep[splitIndex] = 1;
+      ranges.push([start, splitIndex], [splitIndex, end]);
+    }
+  }
+
+  let simplified = [];
+  for (let i = 0; i < points.length; i++) {
+    if (keep[i]) simplified.push(points[i]);
+  }
+  return simplified;
+}
+
+function replayPointSegmentDistanceSq(point, start, end) {
+  let x = Number(start.x) || 0;
+  let y = Number(start.y) || 0;
+  let dx = (Number(end.x) || 0) - x;
+  let dy = (Number(end.y) || 0) - y;
+
+  if (dx !== 0 || dy !== 0) {
+    let t = (((Number(point.x) || 0) - x) * dx + ((Number(point.y) || 0) - y) * dy) /
+      (dx * dx + dy * dy);
+    t = constrain(t, 0, 1);
+    x += dx * t;
+    y += dy * t;
+  }
+
+  let pointDx = (Number(point.x) || 0) - x;
+  let pointDy = (Number(point.y) || 0) - y;
+  return pointDx * pointDx + pointDy * pointDy;
+}
+
 function drawReplayMini(d, limit, miniW, miniH, alphaValue) {
   miniW = max(1, floor(miniW));
   miniH = max(1, floor(miniH));
@@ -6899,7 +7094,16 @@ function drawReplayMini(d, limit, miniW, miniH, alphaValue) {
   g.pixelDensity(1);
   g.clear();
 
-  renderDrawingToGraphics(g, d, limit, true, alphaValue);
+  let replayInfo = getSimplifiedReplayInfo(d);
+  let replayLimit = limit;
+  if (
+    Number.isFinite(limit) &&
+    limit < 999999 &&
+    replayInfo.originalUnits > 0
+  ) {
+    replayLimit = replayInfo.simplifiedUnits * (limit / replayInfo.originalUnits);
+  }
+  renderDrawingToGraphics(g, replayInfo.drawing, replayLimit, true, alphaValue);
 
   image(g, 0, 0);
 }
