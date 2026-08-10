@@ -2390,8 +2390,10 @@ function generateWallMemoryFieldLayout() {
   let cellH = max(mobile ? 166 : 198, maxGroupH + (mobile ? 38 : 54));
   let columns = max(mobile ? 4 : 6, ceil(sqrt(count * (mobile ? 1.15 : 1.55))));
   let rows = ceil(count / columns);
-  let worldW = max(frame.w * (mobile ? 2.1 : 1.85), columns * cellW);
-  let worldH = max(frame.h * (mobile ? 2.0 : 1.65), rows * cellH);
+  // Give the archive enough two-dimensional breathing room for true random
+  // placement. A denser field forces the fallback into visible rows.
+  let worldW = max(frame.w * (mobile ? 2.25 : 2.0), columns * cellW * 1.18);
+  let worldH = max(frame.h * (mobile ? 2.15 : 1.8), rows * cellH * 1.3);
   let centerX = frame.x + frame.w / 2;
   let centerY = frame.y + frame.h / 2;
 
@@ -2403,7 +2405,8 @@ function generateWallMemoryFieldLayout() {
   };
 
   // Place reflection records first, then fill the remaining space with apples.
-  // The collision boxes use their projected depth size so the overview stays airy.
+  // Collision boxes include float clearance and are shared across depth planes,
+  // so the overview never starts with one plane sitting on top of another.
   let positionedItems = new Array(count);
   let occupied = [];
   let placementOrder = items.slice().sort((a, b) => {
@@ -2425,13 +2428,13 @@ function generateWallMemoryFieldLayout() {
     let depthScale = 1 / itemData.depth;
     let depthT = constrain(map(itemData.depth, 0.8, 2.32, 0, 1), 0, 1);
     let parallax = lerp(1.03, 0.56, depthT);
-    let projectedW = itemData.groupW * depthScale + (mobile ? 34 : 52);
-    let projectedH = itemData.groupH * depthScale + (mobile ? 30 : 44);
+    let projectedW = itemData.groupW * depthScale + (mobile ? 68 : 104);
+    let projectedH = itemData.groupH * depthScale + (mobile ? 60 : 88);
     let groupX = centerX;
     let groupY = centerY;
     let chosenBox = null;
 
-    for (let attempt = 0; attempt < 220; attempt++) {
+    for (let attempt = 0; attempt < 640; attempt++) {
       let edgePadX = itemData.groupW / 2 + (mobile ? 24 : 38);
       let edgePadY = itemData.groupH / 2 + (mobile ? 24 : 34);
       let candidateX = lerp(
@@ -2453,7 +2456,7 @@ function generateWallMemoryFieldLayout() {
         bottom: projectedY + projectedH / 2,
         depthLayer: itemData.depthLayer
       };
-      let collides = occupied.some(box => box.depthLayer === itemData.depthLayer && !(
+      let collides = occupied.some(box => !(
         candidateBox.right < box.left ||
         candidateBox.left > box.right ||
         candidateBox.bottom < box.top ||
@@ -2468,16 +2471,15 @@ function generateWallMemoryFieldLayout() {
     }
 
     if (!chosenBox) {
-      // Dense archives scan stable fallback slots, but still reject occupied
-      // slots in the same plane instead of accepting an overlap.
-      let slotCount = columns * rows;
-      let startSlot = floor(wallStableValue(d, i, 700) * slotCount);
-      for (let slotOffset = 0; slotOffset < slotCount; slotOffset++) {
-        let slot = (startSlot + slotOffset) % slotCount;
-        let column = slot % columns;
-        let row = floor(slot / columns);
-        let candidateX = centerX - worldW / 2 + cellW / 2 + column * cellW;
-        let candidateY = centerY - worldH / 2 + cellH / 2 + row * cellH;
+      // Rare overflow continues outwards in two dimensions. This avoids the
+      // old emergency row that made reflection cards look intentionally lined up.
+      let goldenAngle = PI * (3 - sqrt(5));
+      let startRadius = max(worldW, worldH) * 0.48;
+      for (let attempt = 0; attempt < 2400; attempt++) {
+        let radius = startRadius + sqrt(attempt + 1) * max(projectedW, projectedH) * 0.72;
+        let angle = (attempt + wallStableValue(d, i, 701)) * goldenAngle;
+        let candidateX = centerX + cos(angle) * radius * 1.18;
+        let candidateY = centerY + sin(angle) * radius * 0.82;
         let projectedX = centerX + (candidateX - centerX) * parallax;
         let projectedY = centerY + (candidateY - centerY) * parallax;
         let candidateBox = {
@@ -2487,7 +2489,7 @@ function generateWallMemoryFieldLayout() {
           bottom: projectedY + projectedH / 2,
           depthLayer: itemData.depthLayer
         };
-        let collides = occupied.some(box => box.depthLayer === itemData.depthLayer && !(
+        let collides = occupied.some(box => !(
           candidateBox.right < box.left ||
           candidateBox.left > box.right ||
           candidateBox.bottom < box.top ||
@@ -2503,13 +2505,12 @@ function generateWallMemoryFieldLayout() {
     }
 
     if (!chosenBox) {
-      // This should only occur in an unusually dense layer. Keep the record
-      // discoverable in a deterministic overflow lane rather than stacking it.
-      let sameLayerCount = occupied.filter(box => box.depthLayer === itemData.depthLayer).length;
-      let projectedStep = projectedW + (mobile ? 24 : 38);
-      let groupStep = projectedStep / max(0.2, parallax);
-      groupX = wallWorldBounds.x + wallWorldBounds.w + itemData.groupW + sameLayerCount * groupStep;
-      groupY = centerY + (itemData.depthLayer - 1) * cellH;
+      // The search space above is intentionally generous. Keep a deterministic
+      // final position only as a last-resort guard against malformed dimensions.
+      let angle = (placementIndex + 1) * PI * (3 - sqrt(5));
+      let radius = max(worldW, worldH) + (placementIndex + 1) * max(cellW, cellH);
+      groupX = centerX + cos(angle) * radius;
+      groupY = centerY + sin(angle) * radius;
       let projectedX = centerX + (groupX - centerX) * parallax;
       let projectedY = centerY + (groupY - centerY) * parallax;
       chosenBox = {
@@ -2519,12 +2520,26 @@ function generateWallMemoryFieldLayout() {
         bottom: projectedY + projectedH / 2,
         depthLayer: itemData.depthLayer
       };
-      wallWorldBounds.w = max(
-        wallWorldBounds.w,
-        groupX + itemData.groupW / 2 - wallWorldBounds.x + 80
-      );
     }
     occupied.push(chosenBox);
+
+    let groupPad = mobile ? 54 : 80;
+    let nextLeft = min(wallWorldBounds.x, groupX - itemData.groupW / 2 - groupPad);
+    let nextTop = min(wallWorldBounds.y, groupY - itemData.groupH / 2 - groupPad);
+    let nextRight = max(
+      wallWorldBounds.x + wallWorldBounds.w,
+      groupX + itemData.groupW / 2 + groupPad
+    );
+    let nextBottom = max(
+      wallWorldBounds.y + wallWorldBounds.h,
+      groupY + itemData.groupH / 2 + groupPad
+    );
+    wallWorldBounds = {
+      x: nextLeft,
+      y: nextTop,
+      w: nextRight - nextLeft,
+      h: nextBottom - nextTop
+    };
 
     let x = hasReflection
       ? groupX - noteSide * (noteW + itemData.groupGap) / 2
