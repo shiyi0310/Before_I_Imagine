@@ -4479,7 +4479,7 @@ function drawPromptCard(p) {
     textStyle(NORMAL);
     textAlign(LEFT);
 
-    let baseY = y + 20;
+    let baseY = y + 10;
 
     fill(inkCol);
     textSize(13);
