@@ -191,6 +191,7 @@ let wallCameraInitialized = false;
 let wallHelpVisible = false;
 let wallFocusedAppleIndex = -1;
 let wallFocusAnimation = null;
+let wallFocusVisualAmount = 0;
 let isArchivePanning = false;
 let lastPanPoint = { x: 0, y: 0 };
 
@@ -2361,6 +2362,7 @@ function getWallReflectionLabelMetrics(reflection, mobile) {
 function generateWallMemoryFieldLayout() {
   wallFocusedAppleIndex = -1;
   wallFocusAnimation = null;
+  wallFocusVisualAmount = 0;
   wallFieldLayout = [];
   let frame = getWallFieldViewport();
   if (archive.length === 0) {
@@ -2629,8 +2631,16 @@ function getWallFieldFloatOffset(item) {
 }
 
 function getWallFocusZoom(item) {
+  let frame = getWallFieldViewport();
+  let composition = getWallFocusedComposition(item);
+  let depthScale = 1 / max(0.01, item.depth || 1);
+  let fitZoom = frame.w * (isMobileScreen() ? 0.72 : 0.5) /
+    max(1, composition.w * depthScale);
+  let relativeMin = wallCamera.zoom * 1.25;
+  let relativeMax = wallCamera.zoom * 1.4;
   let preferredZoom = [0.92, 1.22, 1.86][item.depthLayer || 0];
-  return constrain(preferredZoom, wallMinZoom, wallMaxZoom);
+  let targetZoom = constrain(max(preferredZoom, fitZoom), relativeMin, relativeMax);
+  return constrain(targetZoom, wallMinZoom, wallMaxZoom);
 }
 
 function getWallFocusCameraTarget(item) {
@@ -2643,12 +2653,14 @@ function getWallFocusCameraTarget(item) {
   let depthScale = 1 / depth;
   let groupX = item.groupX === undefined ? item.x : item.groupX;
   let groupY = item.groupY === undefined ? item.y : item.groupY;
+  let composition = getWallFocusedComposition(item);
+  let focusX = composition.x;
+  let focusY = composition.y;
 
-  // Account for the apple's offset inside a reflection group so the apple,
-  // rather than the combined group box, lands at the viewport centre.
+  // Centre the complete focused annotation, apple and reflection composition.
   return {
-    x: cx - groupX - (item.x - groupX) * depthScale / parallax,
-    y: cy - groupY - (item.y - groupY) * depthScale / parallax
+    x: cx - groupX - (focusX - groupX) * depthScale / parallax,
+    y: cy - groupY - (focusY - groupY) * depthScale / parallax
   };
 }
 
@@ -2666,7 +2678,7 @@ function focusWallFieldItem(index) {
     targetY: target.y,
     targetZoom: getWallFocusZoom(item),
     startedAt: millis(),
-    duration: 720
+    duration: 880
   };
   wallCameraInitialized = true;
   requestRender("wall-focus");
@@ -2708,12 +2720,22 @@ function drawWallMemoryField() {
   if (archive.length === 0) return;
   if (wallFieldLayout.length !== archive.length) generateWallMemoryFieldLayout();
   updateWallFocusAnimation();
+  let focusVisualTarget = wallFocusedAppleIndex >= 0 ? 1 : 0;
+  wallFocusVisualAmount = lerp(wallFocusVisualAmount, focusVisualTarget, 0.11);
+  if (abs(wallFocusVisualAmount - focusVisualTarget) < 0.004) {
+    wallFocusVisualAmount = focusVisualTarget;
+  }
 
   let frame = getWallFieldViewport();
   clipRect(frame.x, frame.y, frame.w, frame.h);
   // Render back-to-front. Each depth plane has its own scale and parallax,
   // producing a quiet camera-through-layers effect without a WebGL scene.
-  let renderItems = wallFieldLayout.slice().sort((a, b) => (b.depth || 1) - (a.depth || 1));
+  let renderItems = wallFieldLayout.slice().sort((a, b) => {
+    let aFocused = a.archiveIndex === wallFocusedAppleIndex;
+    let bFocused = b.archiveIndex === wallFocusedAppleIndex;
+    if (aFocused !== bFocused) return aFocused ? 1 : -1;
+    return (b.depth || 1) - (a.depth || 1);
+  });
   for (let item of renderItems) {
     let d = archive[item.archiveIndex];
     if (!d) continue;
@@ -2728,11 +2750,12 @@ function drawWallMemoryField() {
     if (pose.visibility < 0.015) continue;
     if (!wallFieldItemVisibleOnScreen(item, pose, frame)) continue;
     push();
-    drawingContext.globalAlpha *= pose.visibility;
+    let focused = wallFocusedAppleIndex === item.archiveIndex;
+    let surroundingOpacity = focused ? 1 : lerp(1, 0.32, wallFocusVisualAmount);
+    drawingContext.globalAlpha *= pose.visibility * surroundingOpacity;
     translate(pose.x, pose.y);
     scale(pose.scale);
     translate(-item.x, -item.y);
-    let focused = wallFocusedAppleIndex === item.archiveIndex;
     let focusedGroupHovered = focused && isWallFocusedGroupAt(mouseX, mouseY);
     drawWallFieldApple(d, item, focused, focusedGroupHovered);
     if (
@@ -2740,7 +2763,7 @@ function drawWallMemoryField() {
       wallCamera.zoom >= 0.5 &&
       pose.visibility > 0.08
     ) {
-      drawWallReflectionLabel(d, item, focusedGroupHovered);
+      drawWallReflectionLabel(d, item, focused, focusedGroupHovered);
     }
     if (focused && pose.visibility > 0.08) {
       drawWallFocusedMetadata(d, item, focusedGroupHovered);
@@ -2794,12 +2817,23 @@ function wallFieldItemVisibleOnScreen(item, pose, frame) {
   let top = pose.y - item.size * scaleValue / 2;
   let bottom = pose.y + item.size * scaleValue / 2;
   if (item.hasReflection && wallCamera.zoom >= 0.5) {
-    let noteX = pose.x + (item.noteX - item.x) * scaleValue;
-    let noteY = pose.y + (item.noteY - item.y) * scaleValue;
-    left = min(left, noteX - item.noteW * scaleValue / 2);
-    right = max(right, noteX + item.noteW * scaleValue / 2);
-    top = min(top, noteY - item.noteH * scaleValue / 2);
-    bottom = max(bottom, noteY + item.noteH * scaleValue / 2);
+    let focused = item.archiveIndex === wallFocusedAppleIndex;
+    let note = getWallReflectionLayout(item, focused);
+    let noteX = pose.x + (note.x - item.x) * scaleValue;
+    let noteY = pose.y + (note.y - item.y) * scaleValue;
+    left = min(left, noteX - note.w * scaleValue / 2);
+    right = max(right, noteX + note.w * scaleValue / 2);
+    top = min(top, noteY - note.h * scaleValue / 2);
+    bottom = max(bottom, noteY + note.h * scaleValue / 2);
+  }
+  if (item.archiveIndex === wallFocusedAppleIndex) {
+    let meta = getWallFocusedMetadataLayout(item);
+    let metaX = pose.x + (meta.x - item.x) * scaleValue;
+    let metaY = pose.y + (meta.y - item.y) * scaleValue;
+    left = min(left, metaX - meta.w * scaleValue / 2);
+    right = max(right, metaX + meta.w * scaleValue / 2);
+    top = min(top, metaY - meta.h * scaleValue / 2);
+    bottom = max(bottom, metaY + meta.h * scaleValue / 2);
   }
   return (
     right >= frame.x - 30 &&
@@ -2843,7 +2877,7 @@ function drawWallFieldApple(d, item, focused = false, focusedGroupHovered = fals
 
   if (focused || (wallCamera.zoom >= 0.8 && item.depthLayer === 0)) drawingContext.restore();
 
-  if (wallCamera.zoom >= 0.92 && item.depthLayer !== 2) {
+  if (!focused && wallCamera.zoom >= 0.92 && item.depthLayer !== 2) {
     noStroke();
     fill(91, 84, 77, 135);
     textAlign(LEFT, TOP);
@@ -2858,15 +2892,58 @@ function getWallRecordNumber(d, fallbackIndex) {
   return Number.isFinite(value) ? value : fallbackIndex + 1;
 }
 
+function getWallReflectionLayout(item, focused = false) {
+  if (!focused) {
+    return {
+      x: item.noteX,
+      y: item.noteY,
+      w: item.noteW,
+      h: item.noteH
+    };
+  }
+
+  let gap = isMobileScreen() ? 14 : 24;
+  return {
+    x: item.x + item.size / 2 + item.noteW / 2 + gap,
+    y: item.y,
+    w: item.noteW,
+    h: item.noteH
+  };
+}
+
 function getWallFocusedMetadataLayout(item) {
-  let metaW = isMobileScreen() ? 116 : 142;
-  let metaH = isMobileScreen() ? 58 : 64;
-  let side = item.hasReflection
-    ? (item.noteX > item.x ? -1 : 1)
-    : (item.groupX < wallWorldBounds.x + wallWorldBounds.w / 2 ? 1 : -1);
-  let metaX = item.x + side * (item.size / 2 + metaW / 2 + 12);
-  let metaY = item.y;
-  return { x: metaX, y: metaY, w: metaW, h: metaH };
+  let metaW = isMobileScreen() ? 106 : 138;
+  let metaH = isMobileScreen() ? 62 : 76;
+  let gap = isMobileScreen() ? 14 : 24;
+  return {
+    x: item.x - item.size / 2 - metaW / 2 - gap,
+    y: item.y,
+    w: metaW,
+    h: metaH
+  };
+}
+
+function getWallFocusedComposition(item) {
+  let meta = getWallFocusedMetadataLayout(item);
+  let note = item.hasReflection ? getWallReflectionLayout(item, true) : null;
+  let left = min(meta.x - meta.w / 2, item.x - item.size / 2);
+  let right = max(meta.x + meta.w / 2, item.x + item.size / 2);
+  let top = min(meta.y - meta.h / 2, item.y - item.size / 2);
+  let bottom = max(meta.y + meta.h / 2, item.y + item.size / 2);
+
+  if (note) {
+    left = min(left, note.x - note.w / 2);
+    right = max(right, note.x + note.w / 2);
+    top = min(top, note.y - note.h / 2);
+    bottom = max(bottom, note.y + note.h / 2);
+  }
+
+  return {
+    x: (left + right) / 2,
+    y: (top + bottom) / 2,
+    w: right - left,
+    h: bottom - top
+  };
 }
 
 function drawWallFocusedMetadata(d, item, focusedGroupHovered = false) {
@@ -2883,41 +2960,44 @@ function drawWallFocusedMetadata(d, item, focusedGroupHovered = false) {
     : "UNDATED";
 
   push();
-  drawingContext.save();
-  drawingContext.shadowColor = "rgba(52, 45, 38, 0.09)";
-  drawingContext.shadowBlur = 8;
-  drawingContext.shadowOffsetY = 2;
-  fill(252, 250, 245, focusedGroupHovered ? 250 : 238);
-  stroke(96, 89, 81, focusedGroupHovered ? 115 : 70);
-  strokeWeight(focusedGroupHovered ? 1 : 0.8);
-  rect(metaX - metaW / 2, metaY - metaH / 2, metaW, metaH, 4);
-  drawingContext.restore();
+  noStroke();
+  fill(28, 26, 24, focusedGroupHovered ? 255 : 235);
+  textAlign(LEFT, TOP);
+  textSize(isMobileScreen() ? 9 : 11);
+  text(`RECORD  #${recordNumber}`, metaX - metaW / 2, metaY - metaH / 2);
+  fill(66, 61, 56, focusedGroupHovered ? 225 : 190);
+  textSize(isMobileScreen() ? 7.5 : 9);
+  text(
+    `${promptLabel}  ·  ${durationLabel}`,
+    metaX - metaW / 2,
+    metaY - metaH / 2 + (isMobileScreen() ? 19 : 23)
+  );
+
+  stroke(80, 74, 68, focusedGroupHovered ? 155 : 105);
+  strokeWeight(0.7);
+  drawingContext.setLineDash([4, 4]);
+  line(
+    metaX - metaW / 2,
+    metaY - metaH / 2 + (isMobileScreen() ? 36 : 43),
+    metaX + metaW / 2,
+    metaY - metaH / 2 + (isMobileScreen() ? 36 : 43)
+  );
+  drawingContext.setLineDash([]);
 
   noStroke();
-  fill(34, 31, 28, 225);
-  textAlign(LEFT, TOP);
-  textSize(isMobileScreen() ? 8.5 : 9.5);
-  text(`RECORD #${recordNumber}`, metaX - metaW / 2 + 10, metaY - metaH / 2 + 8);
-  fill(73, 67, 61, 180);
-  textSize(isMobileScreen() ? 7.5 : 8.5);
-  text(
-    `${promptLabel}  /  ${durationLabel}`,
-    metaX - metaW / 2 + 10,
-    metaY - metaH / 2 + 25
-  );
-  fill(49, 45, 41, focusedGroupHovered ? 225 : 165);
-  textSize(isMobileScreen() ? 7.5 : 8);
+  fill(44, 40, 37, focusedGroupHovered ? 245 : 190);
+  textSize(isMobileScreen() ? 8 : 9);
   textStyle(focusedGroupHovered ? BOLD : NORMAL);
   text(
-    "OPEN RECORD \u2192",
-    metaX - metaW / 2 + 10,
-    metaY - metaH / 2 + 43
+    "OPEN  \u2197",
+    metaX - metaW / 2,
+    metaY - metaH / 2 + (isMobileScreen() ? 45 : 55)
   );
   textStyle(NORMAL);
   pop();
 }
 
-function drawWallReflectionLabel(d, item, focusedGroupHovered = false) {
+function drawWallReflectionLabel(d, item, focused = false, focusedGroupHovered = false) {
   push();
   let colors = [
     [247, 229, 170],
@@ -2926,32 +3006,35 @@ function drawWallReflectionLabel(d, item, focusedGroupHovered = false) {
     [221, 211, 235]
   ];
   let c = colors[item.noteColorIndex % colors.length];
+  let note = getWallReflectionLayout(item, focused);
 
   if (wallCamera.zoom >= 0.8) {
     stroke(112, 104, 94, 80);
     strokeWeight(0.8);
     drawingContext.setLineDash([3, 4]);
     line(
-      item.x + (item.noteX > item.x ? item.size * 0.36 : -item.size * 0.36),
+      item.x + (note.x > item.x ? item.size * 0.36 : -item.size * 0.36),
       item.y,
-      item.noteX + (item.noteX > item.x ? -item.noteW / 2 : item.noteW / 2),
-      item.noteY
+      note.x + (note.x > item.x ? -note.w / 2 : note.w / 2),
+      note.y
     );
     drawingContext.setLineDash([]);
   }
 
   drawingContext.save();
-  drawingContext.shadowColor = "rgba(52, 45, 38, 0.08)";
-  drawingContext.shadowBlur = 8;
-  drawingContext.shadowOffsetY = 3;
-  fill(c[0], c[1], c[2], focusedGroupHovered ? 220 : 196);
-  stroke(105, 96, 86, focusedGroupHovered ? 100 : 55);
-  strokeWeight(focusedGroupHovered ? 1 : 0.8);
+  drawingContext.shadowColor = focused
+    ? "rgba(52, 45, 38, 0.055)"
+    : "rgba(52, 45, 38, 0.08)";
+  drawingContext.shadowBlur = focused ? 5 : 8;
+  drawingContext.shadowOffsetY = focused ? 2 : 3;
+  fill(c[0], c[1], c[2], focusedGroupHovered ? 218 : (focused ? 178 : 196));
+  stroke(105, 96, 86, focusedGroupHovered ? 105 : (focused ? 48 : 55));
+  strokeWeight(focusedGroupHovered ? 1 : (focused ? 0.65 : 0.8));
   rect(
-    item.noteX - item.noteW / 2,
-    item.noteY - item.noteH / 2,
-    item.noteW,
-    item.noteH,
+    note.x - note.w / 2,
+    note.y - note.h / 2,
+    note.w,
+    note.h,
     4
   );
   drawingContext.restore();
@@ -2964,24 +3047,26 @@ function drawWallReflectionLabel(d, item, focusedGroupHovered = false) {
   textWrap(CHAR);
   text(
     item.reflection,
-    item.noteX - item.noteW / 2 + 10,
-    item.noteY - item.noteH / 2 + 10,
-    item.noteW - 20,
-    item.noteH - 27
+    note.x - note.w / 2 + 10,
+    note.y - note.h / 2 + 10,
+    note.w - 20,
+    note.h - (focused ? 20 : 27)
   );
   textWrap(WORD);
 
-  fill(74, 68, 62, 135);
-  textSize(7.5);
-  text(
-    `#${item.archiveIndex + 1}`,
-    item.noteX - item.noteW / 2 + 10,
-    item.noteY + item.noteH / 2 - 13
-  );
+  if (!focused) {
+    fill(74, 68, 62, 135);
+    textSize(7.5);
+    text(
+      `#${item.archiveIndex + 1}`,
+      note.x - note.w / 2 + 10,
+      note.y + note.h / 2 - 13
+    );
+  }
 
   noStroke();
   fill(70, 66, 61, 155);
-  circle(item.noteX + item.noteW / 2 - 7, item.noteY - item.noteH / 2 + 7, 4);
+  circle(note.x + note.w / 2 - 7, note.y - note.h / 2 + 7, 4);
   pop();
 }
 
@@ -3225,9 +3310,10 @@ function isWallFocusedGroupAt(screenX, screenY) {
   if (insideCenteredRect(metaX, metaY, meta.w, meta.h)) return true;
 
   if (item.hasReflection && wallCamera.zoom >= 0.5) {
-    let noteX = pose.x + (item.noteX - item.x) * scaleValue;
-    let noteY = pose.y + (item.noteY - item.y) * scaleValue;
-    if (insideCenteredRect(noteX, noteY, item.noteW, item.noteH)) return true;
+    let note = getWallReflectionLayout(item, true);
+    let noteX = pose.x + (note.x - item.x) * scaleValue;
+    let noteY = pose.y + (note.y - item.y) * scaleValue;
+    if (insideCenteredRect(noteX, noteY, note.w, note.h)) return true;
   }
   return false;
 }
