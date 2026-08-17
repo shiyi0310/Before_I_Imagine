@@ -2636,10 +2636,10 @@ function getWallFocusZoom(item) {
   let depthScale = 1 / max(0.01, item.depth || 1);
   let fitZoom = frame.w * (isMobileScreen() ? 0.72 : 0.5) /
     max(1, composition.w * depthScale);
-  let relativeMin = wallCamera.zoom * 1.25;
-  let relativeMax = wallCamera.zoom * 1.4;
   let preferredZoom = [0.92, 1.22, 1.86][item.depthLayer || 0];
-  let targetZoom = constrain(max(preferredZoom, fitZoom), relativeMin, relativeMax);
+  // Focus has a stable destination. Basing it on the current zoom compounds
+  // repeated focus attempts and can push the item beyond its depth plane.
+  let targetZoom = max(preferredZoom, fitZoom);
   return constrain(targetZoom, wallMinZoom, wallMaxZoom);
 }
 
@@ -2752,12 +2752,13 @@ function drawWallMemoryField() {
 
     let floatOffset = getWallFieldFloatOffset(item);
     let pose = getWallFieldItemScreenPose(item, floatOffset);
-    if (pose.visibility < 0.015) continue;
+    let focused = wallFocusedAppleIndex === item.archiveIndex;
+    let renderedVisibility = focused ? 1 : pose.visibility;
+    if (renderedVisibility < 0.015) continue;
     if (!wallFieldItemVisibleOnScreen(item, pose, frame)) continue;
     push();
-    let focused = wallFocusedAppleIndex === item.archiveIndex;
     let surroundingOpacity = focused ? 1 : lerp(1, 0.32, wallFocusVisualAmount);
-    drawingContext.globalAlpha *= pose.visibility * surroundingOpacity;
+    drawingContext.globalAlpha *= renderedVisibility * surroundingOpacity;
     translate(pose.x, pose.y);
     scale(pose.scale);
     translate(-item.x, -item.y);
@@ -2766,11 +2767,11 @@ function drawWallMemoryField() {
     if (
       item.hasReflection &&
       wallCamera.zoom >= 0.5 &&
-      pose.visibility > 0.08
+      renderedVisibility > 0.08
     ) {
       drawWallReflectionLabel(d, item, focused, focusedGroupHovered);
     }
-    if (focused && pose.visibility > 0.08) {
+    if (focused && renderedVisibility > 0.08) {
       drawWallFocusedMetadata(d, item, focusedGroupHovered);
     }
     pop();
@@ -3298,7 +3299,6 @@ function isWallFocusedGroupAt(screenX, screenY) {
 
   let floatOffset = getWallFieldFloatOffset(item);
   let pose = getWallFieldItemScreenPose(item, floatOffset);
-  if (pose.visibility < 0.08) return false;
   let scaleValue = max(0.01, pose.scale);
   let insideCenteredRect = (centerX, centerY, rectW, rectH) => (
     abs(screenX - centerX) <= rectW * scaleValue / 2 &&
