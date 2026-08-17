@@ -2733,16 +2733,17 @@ function drawWallMemoryField() {
     scale(pose.scale);
     translate(-item.x, -item.y);
     let focused = wallFocusedAppleIndex === item.archiveIndex;
-    drawWallFieldApple(d, item, focused);
+    let focusedGroupHovered = focused && isWallFocusedGroupAt(mouseX, mouseY);
+    drawWallFieldApple(d, item, focused, focusedGroupHovered);
     if (
       item.hasReflection &&
       wallCamera.zoom >= 0.5 &&
       pose.visibility > 0.08
     ) {
-      drawWallReflectionLabel(d, item);
+      drawWallReflectionLabel(d, item, focusedGroupHovered);
     }
     if (focused && pose.visibility > 0.08) {
-      drawWallFocusedMetadata(d, item);
+      drawWallFocusedMetadata(d, item, focusedGroupHovered);
     }
     pop();
   }
@@ -2808,11 +2809,11 @@ function wallFieldItemVisibleOnScreen(item, pose, frame) {
   );
 }
 
-function drawWallFieldApple(d, item, focused = false) {
+function drawWallFieldApple(d, item, focused = false, focusedGroupHovered = false) {
   push();
   translate(item.x, item.y);
   rotate(item.rotation);
-  if (focused) scale(1.055);
+  if (focused) scale(focusedGroupHovered ? 1.075 : 1.055);
 
   if (focused || (wallCamera.zoom >= 0.8 && item.depthLayer === 0)) {
     drawingContext.save();
@@ -2857,14 +2858,23 @@ function getWallRecordNumber(d, fallbackIndex) {
   return Number.isFinite(value) ? value : fallbackIndex + 1;
 }
 
-function drawWallFocusedMetadata(d, item) {
+function getWallFocusedMetadataLayout(item) {
   let metaW = isMobileScreen() ? 116 : 142;
-  let metaH = isMobileScreen() ? 43 : 48;
+  let metaH = isMobileScreen() ? 58 : 64;
   let side = item.hasReflection
     ? (item.noteX > item.x ? -1 : 1)
     : (item.groupX < wallWorldBounds.x + wallWorldBounds.w / 2 ? 1 : -1);
   let metaX = item.x + side * (item.size / 2 + metaW / 2 + 12);
   let metaY = item.y;
+  return { x: metaX, y: metaY, w: metaW, h: metaH };
+}
+
+function drawWallFocusedMetadata(d, item, focusedGroupHovered = false) {
+  let meta = getWallFocusedMetadataLayout(item);
+  let metaX = meta.x;
+  let metaY = meta.y;
+  let metaW = meta.w;
+  let metaH = meta.h;
   let recordNumber = getWallRecordNumber(d, item.archiveIndex);
   let promptLabel = getWallPromptShortLabel(getDrawingPromptIndex(d));
   let seconds = Number(d && d.durationSeconds);
@@ -2877,9 +2887,9 @@ function drawWallFocusedMetadata(d, item) {
   drawingContext.shadowColor = "rgba(52, 45, 38, 0.09)";
   drawingContext.shadowBlur = 8;
   drawingContext.shadowOffsetY = 2;
-  fill(252, 250, 245, 238);
-  stroke(96, 89, 81, 70);
-  strokeWeight(0.8);
+  fill(252, 250, 245, focusedGroupHovered ? 250 : 238);
+  stroke(96, 89, 81, focusedGroupHovered ? 115 : 70);
+  strokeWeight(focusedGroupHovered ? 1 : 0.8);
   rect(metaX - metaW / 2, metaY - metaH / 2, metaW, metaH, 4);
   drawingContext.restore();
 
@@ -2895,10 +2905,19 @@ function drawWallFocusedMetadata(d, item) {
     metaX - metaW / 2 + 10,
     metaY - metaH / 2 + 25
   );
+  fill(49, 45, 41, focusedGroupHovered ? 225 : 165);
+  textSize(isMobileScreen() ? 7.5 : 8);
+  textStyle(focusedGroupHovered ? BOLD : NORMAL);
+  text(
+    "OPEN RECORD \u2192",
+    metaX - metaW / 2 + 10,
+    metaY - metaH / 2 + 43
+  );
+  textStyle(NORMAL);
   pop();
 }
 
-function drawWallReflectionLabel(d, item) {
+function drawWallReflectionLabel(d, item, focusedGroupHovered = false) {
   push();
   let colors = [
     [247, 229, 170],
@@ -2925,9 +2944,9 @@ function drawWallReflectionLabel(d, item) {
   drawingContext.shadowColor = "rgba(52, 45, 38, 0.08)";
   drawingContext.shadowBlur = 8;
   drawingContext.shadowOffsetY = 3;
-  fill(c[0], c[1], c[2], 196);
-  stroke(105, 96, 86, 55);
-  strokeWeight(0.8);
+  fill(c[0], c[1], c[2], focusedGroupHovered ? 220 : 196);
+  stroke(105, 96, 86, focusedGroupHovered ? 100 : 55);
+  strokeWeight(focusedGroupHovered ? 1 : 0.8);
   rect(
     item.noteX - item.noteW / 2,
     item.noteY - item.noteH / 2,
@@ -3182,8 +3201,40 @@ function handleWallFieldControl(control) {
   requestRender("wall-control");
 }
 
+function isWallFocusedGroupAt(screenX, screenY) {
+  if (!isTopWallMode() || wallFocusedAppleIndex < 0) return false;
+  let item = wallFieldLayout.find(candidate => candidate.archiveIndex === wallFocusedAppleIndex);
+  if (!item) return false;
+
+  let floatOffset = getWallFieldFloatOffset(item);
+  let pose = getWallFieldItemScreenPose(item, floatOffset);
+  if (pose.visibility < 0.08) return false;
+  let scaleValue = max(0.01, pose.scale);
+  let insideCenteredRect = (centerX, centerY, rectW, rectH) => (
+    abs(screenX - centerX) <= rectW * scaleValue / 2 &&
+    abs(screenY - centerY) <= rectH * scaleValue / 2
+  );
+
+  if (insideCenteredRect(pose.x, pose.y, item.size * 1.16, item.size * 1.16)) {
+    return true;
+  }
+
+  let meta = getWallFocusedMetadataLayout(item);
+  let metaX = pose.x + (meta.x - item.x) * scaleValue;
+  let metaY = pose.y + (meta.y - item.y) * scaleValue;
+  if (insideCenteredRect(metaX, metaY, meta.w, meta.h)) return true;
+
+  if (item.hasReflection && wallCamera.zoom >= 0.5) {
+    let noteX = pose.x + (item.noteX - item.x) * scaleValue;
+    let noteY = pose.y + (item.noteY - item.y) * scaleValue;
+    if (insideCenteredRect(noteX, noteY, item.noteW, item.noteH)) return true;
+  }
+  return false;
+}
+
 function getWallFieldItemAt(screenX, screenY) {
   if (!isTopWallMode()) return -1;
+  if (isWallFocusedGroupAt(screenX, screenY)) return wallFocusedAppleIndex;
   let hitOrder = wallFieldLayout.slice().sort((a, b) => (a.depth || 1) - (b.depth || 1));
   for (let item of hitOrder) {
     let floatOffset = getWallFieldFloatOffset(item);
@@ -4460,7 +4511,12 @@ function mouseReleased() {
 }
 
 function mouseMoved() {
-  if (page === "draw" && !modalOpen) requestRender("mouse-moved");
+  if (page === "draw" && !modalOpen) {
+    requestRender("mouse-moved");
+  } else if (isTopWallMode() && !modalOpen) {
+    cursor(isWallFocusedGroupAt(mouseX, mouseY) ? HAND : ARROW);
+    requestRender("wall-focus-hover");
+  }
 }
 
 function mouseClicked() {
