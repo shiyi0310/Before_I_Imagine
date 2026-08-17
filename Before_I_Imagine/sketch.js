@@ -189,6 +189,7 @@ let wallFieldLayout = [];
 let wallWorldBounds = { x: 0, y: 0, w: 1, h: 1 };
 let wallCameraInitialized = false;
 let wallHelpVisible = false;
+let wallHelpAutoHideTimer = null;
 let wallFocusedAppleIndex = -1;
 let wallFocusAnimation = null;
 let wallFocusVisualAmount = 0;
@@ -3288,8 +3289,29 @@ function handleWallFieldControl(control) {
   if (control === "zoom-in") zoomTopWallCameraAt(cx, cy, 1.28);
   if (control === "zoom-out") zoomTopWallCameraAt(cx, cy, 0.78);
   if (control === "fit") fitWallCameraToWorld();
-  if (control === "help") wallHelpVisible = !wallHelpVisible;
+  if (control === "help") {
+    cancelWallHelpAutoHide();
+    wallHelpVisible = !wallHelpVisible;
+  }
   requestRender("wall-control");
+}
+
+function cancelWallHelpAutoHide() {
+  if (wallHelpAutoHideTimer !== null) {
+    clearTimeout(wallHelpAutoHideTimer);
+    wallHelpAutoHideTimer = null;
+  }
+}
+
+function showWallHelpTemporarily() {
+  cancelWallHelpAutoHide();
+  wallHelpVisible = true;
+  requestRender("wall-help-auto-show");
+  wallHelpAutoHideTimer = setTimeout(() => {
+    wallHelpAutoHideTimer = null;
+    wallHelpVisible = false;
+    requestRender("wall-help-auto-hide");
+  }, 2000);
 }
 
 function isWallFocusedGroupAt(screenX, screenY) {
@@ -5050,6 +5072,8 @@ function handleDrawPageClick(x, y) {
   if (switchMode) {
     archiveLastInteractionTime = millis();
     if (switchMode !== "wall") {
+      cancelWallHelpAutoHide();
+      wallHelpVisible = false;
       wallFocusedAppleIndex = -1;
       wallFocusAnimation = null;
     }
@@ -5073,6 +5097,7 @@ function handleDrawPageClick(x, y) {
       }
       if (switchMode === "wall") {
         generateWallMemoryFieldLayout();
+        showWallHelpTemporarily();
       }
       if (switchMode === "average") {
         ensureAveragePromptCache(averagePromptIndex);
