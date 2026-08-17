@@ -209,14 +209,15 @@ function drawAppleReportCard(card, promptNumber, personalDrawing) {
 
 function drawAppleReportImageSlot(drawing, label, x, y, w, h, emptyLabel = "image pending") {
   let mobile = isMobileScreen();
+  let labelGap = mobile ? 17 : 24;
   noStroke();
   fill(inkCol);
   textAlign(CENTER, TOP);
   textSize(mobile ? 6 : 7);
   text(label, x + w / 2, y);
 
-  let boxY = y + (mobile ? 9 : 12);
-  let boxH = max(28, h - (mobile ? 9 : 12));
+  let boxY = y + labelGap;
+  let boxH = max(28, h - labelGap);
   noFill();
   stroke(198, 190, 179, 105);
   rect(x, boxY, w, boxH, 5);

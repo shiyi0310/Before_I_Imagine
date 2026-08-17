@@ -1372,7 +1372,7 @@ function drawDrawPageSidebar() {
   rect(0, 0, w, height);
 
   fill("#2470ff");
-  textAlign(LEFT);
+  textAlign(LEFT, BASELINE);
   textSize(isCompactDesktop() ? 12 : 14);
   drawingContext.letterSpacing = "2px";
   let brandY = 42;
@@ -3092,6 +3092,7 @@ function getWallFieldControlRects() {
 }
 
 function drawWallFieldControls() {
+  push();
   let controls = getWallFieldControlRects();
   for (let control of controls) {
     drawingContext.save();
@@ -3132,6 +3133,7 @@ function drawWallFieldControls() {
       boxH - 18
     );
   }
+  pop();
 }
 
 function getWallFieldMinimapRect() {
