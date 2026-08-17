@@ -2716,6 +2716,11 @@ function clearWallFieldFocus() {
   requestRender("wall-focus-clear");
 }
 
+function clearWallFocusForManualCamera() {
+  if (wallFocusedAppleIndex < 0 && !wallFocusAnimation) return;
+  clearWallFieldFocus();
+}
+
 function drawWallMemoryField() {
   if (archive.length === 0) return;
   if (wallFieldLayout.length !== archive.length) generateWallMemoryFieldLayout();
@@ -3184,7 +3189,7 @@ function drawWallFieldMinimap() {
 }
 
 function recenterWallCameraFromMinimap(screenX, screenY) {
-  cancelWallFocusAnimation(false);
+  clearWallFocusForManualCamera();
   let r = getWallFieldMinimapRect();
   let pad = 8;
   let worldX = map(
@@ -3275,7 +3280,7 @@ function getWallFieldControlAt(x, y) {
 }
 
 function handleWallFieldControl(control) {
-  cancelWallFocusAnimation(false);
+  if (control !== "help") clearWallFocusForManualCamera();
   let frame = getWallFieldViewport();
   let cx = frame.x + frame.w / 2;
   let cy = frame.y + frame.h / 2;
@@ -3365,6 +3370,7 @@ function handleTopWallPress(x, y) {
 
 function beginWallTouchGesture() {
   if (touches.length < 2) return;
+  clearWallFocusForManualCamera();
   let a = touches[0];
   let b = touches[1];
   wallTouchGestureActive = true;
@@ -3378,7 +3384,7 @@ function beginWallTouchGesture() {
 
 function updateWallTouchGesture() {
   if (touches.length < 2) return;
-  cancelWallFocusAnimation(false);
+  clearWallFocusForManualCamera();
   let a = touches[0];
   let b = touches[1];
   let center = {
@@ -4809,6 +4815,7 @@ function handlePointerDragged(x, y) {
     let dx = x - lastWallPanPoint.x;
     let dy = y - lastWallPanPoint.y;
     wallDragDistance += abs(dx) + abs(dy);
+    if (wallDragDistance >= 8) clearWallFocusForManualCamera();
     lastWallPanPoint = { x: x, y: y };
     return false;
   }
@@ -5368,7 +5375,7 @@ function mouseWheel(event) {
   if (isTopWallMode()) {
     let frame = getWallFieldViewport();
     if (pointInsideRect(mouseX, mouseY, frame) && !isClickOnViewSwitcher(mouseX, mouseY)) {
-      cancelWallFocusAnimation(false);
+      clearWallFocusForManualCamera();
       if (event.ctrlKey) {
         let pinchDelta = event.deltaY !== undefined ? event.deltaY : event.delta;
         let zoomFactor = exp(-pinchDelta * 0.01);
