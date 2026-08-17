@@ -2637,9 +2637,9 @@ function getWallFocusZoom(item) {
   let fitZoom = frame.w * (isMobileScreen() ? 0.72 : 0.5) /
     max(1, composition.w * depthScale);
   let preferredZoom = [0.92, 1.22, 1.86][item.depthLayer || 0];
-  // Focus has a stable destination. Basing it on the current zoom compounds
-  // repeated focus attempts and can push the item beyond its depth plane.
-  let targetZoom = max(preferredZoom, fitZoom);
+  // Keep each depth plane's preferred focus scale, but cap it when the full
+  // focused composition needs a smaller zoom to stay comfortably in view.
+  let targetZoom = min(preferredZoom, fitZoom);
   return constrain(targetZoom, wallMinZoom, wallMaxZoom);
 }
 
