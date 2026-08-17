@@ -189,6 +189,8 @@ let wallFieldLayout = [];
 let wallWorldBounds = { x: 0, y: 0, w: 1, h: 1 };
 let wallCameraInitialized = false;
 let wallHelpVisible = false;
+let wallFocusedAppleIndex = -1;
+let wallFocusAnimation = null;
 let isArchivePanning = false;
 let lastPanPoint = { x: 0, y: 0 };
 
@@ -2357,6 +2359,8 @@ function getWallReflectionLabelMetrics(reflection, mobile) {
 }
 
 function generateWallMemoryFieldLayout() {
+  wallFocusedAppleIndex = -1;
+  wallFocusAnimation = null;
   wallFieldLayout = [];
   let frame = getWallFieldViewport();
   if (archive.length === 0) {
@@ -2624,9 +2628,86 @@ function getWallFieldFloatOffset(item) {
   };
 }
 
+function getWallFocusZoom(item) {
+  let preferredZoom = [0.92, 1.22, 1.86][item.depthLayer || 0];
+  return constrain(preferredZoom, wallMinZoom, wallMaxZoom);
+}
+
+function getWallFocusCameraTarget(item) {
+  let frame = getWallFieldViewport();
+  let cx = frame.x + frame.w / 2;
+  let cy = frame.y + frame.h / 2;
+  let depth = item.depth || 1;
+  let depthT = constrain(map(depth, 0.8, 2.32, 0, 1), 0, 1);
+  let parallax = lerp(1.03, 0.56, depthT);
+  let depthScale = 1 / depth;
+  let groupX = item.groupX === undefined ? item.x : item.groupX;
+  let groupY = item.groupY === undefined ? item.y : item.groupY;
+
+  // Account for the apple's offset inside a reflection group so the apple,
+  // rather than the combined group box, lands at the viewport centre.
+  return {
+    x: cx - groupX - (item.x - groupX) * depthScale / parallax,
+    y: cy - groupY - (item.y - groupY) * depthScale / parallax
+  };
+}
+
+function focusWallFieldItem(index) {
+  let item = wallFieldLayout.find((candidate) => candidate.archiveIndex === index);
+  if (!item) return;
+
+  let target = getWallFocusCameraTarget(item);
+  wallFocusedAppleIndex = index;
+  wallFocusAnimation = {
+    startX: wallCamera.x,
+    startY: wallCamera.y,
+    startZoom: wallCamera.zoom,
+    targetX: target.x,
+    targetY: target.y,
+    targetZoom: getWallFocusZoom(item),
+    startedAt: millis(),
+    duration: 720
+  };
+  wallCameraInitialized = true;
+  requestRender("wall-focus");
+}
+
+function updateWallFocusAnimation() {
+  if (!wallFocusAnimation || !isTopWallMode()) return;
+  let progress = constrain(
+    (millis() - wallFocusAnimation.startedAt) / wallFocusAnimation.duration,
+    0,
+    1
+  );
+  let eased = progress < 0.5
+    ? 4 * progress * progress * progress
+    : 1 - pow(-2 * progress + 2, 3) / 2;
+
+  wallCamera.x = lerp(wallFocusAnimation.startX, wallFocusAnimation.targetX, eased);
+  wallCamera.y = lerp(wallFocusAnimation.startY, wallFocusAnimation.targetY, eased);
+  wallCamera.zoom = lerp(
+    wallFocusAnimation.startZoom,
+    wallFocusAnimation.targetZoom,
+    eased
+  );
+  constrainTopWallCamera();
+  if (progress >= 1) wallFocusAnimation = null;
+}
+
+function cancelWallFocusAnimation(clearFocus = false) {
+  wallFocusAnimation = null;
+  if (clearFocus) wallFocusedAppleIndex = -1;
+}
+
+function clearWallFieldFocus() {
+  cancelWallFocusAnimation(true);
+  requestRender("wall-focus-clear");
+}
+
 function drawWallMemoryField() {
   if (archive.length === 0) return;
   if (wallFieldLayout.length !== archive.length) generateWallMemoryFieldLayout();
+  updateWallFocusAnimation();
 
   let frame = getWallFieldViewport();
   clipRect(frame.x, frame.y, frame.w, frame.h);
@@ -2651,13 +2732,17 @@ function drawWallMemoryField() {
     translate(pose.x, pose.y);
     scale(pose.scale);
     translate(-item.x, -item.y);
-    drawWallFieldApple(d, item);
+    let focused = wallFocusedAppleIndex === item.archiveIndex;
+    drawWallFieldApple(d, item, focused);
     if (
       item.hasReflection &&
       wallCamera.zoom >= 0.5 &&
       pose.visibility > 0.08
     ) {
       drawWallReflectionLabel(d, item);
+    }
+    if (focused && pose.visibility > 0.08) {
+      drawWallFocusedMetadata(d, item);
     }
     pop();
   }
@@ -2723,20 +2808,23 @@ function wallFieldItemVisibleOnScreen(item, pose, frame) {
   );
 }
 
-function drawWallFieldApple(d, item) {
+function drawWallFieldApple(d, item, focused = false) {
   push();
   translate(item.x, item.y);
   rotate(item.rotation);
+  if (focused) scale(1.055);
 
-  if (wallCamera.zoom >= 0.8 && item.depthLayer === 0) {
+  if (focused || (wallCamera.zoom >= 0.8 && item.depthLayer === 0)) {
     drawingContext.save();
-    drawingContext.shadowColor = "rgba(55, 47, 38, 0.10)";
-    drawingContext.shadowBlur = 9;
-    drawingContext.shadowOffsetY = 3;
+    drawingContext.shadowColor = focused
+      ? "rgba(55, 47, 38, 0.18)"
+      : "rgba(55, 47, 38, 0.10)";
+    drawingContext.shadowBlur = focused ? 14 : 9;
+    drawingContext.shadowOffsetY = focused ? 4 : 3;
   }
 
   if (item.cachedThumb) {
-    tint(255, 255 * item.alpha);
+    tint(255, 255 * (focused ? max(item.alpha, 0.96) : item.alpha));
     drawImageContained(
       item.cachedThumb,
       -item.size / 2,
@@ -2752,7 +2840,7 @@ function drawWallFieldApple(d, item) {
     pop();
   }
 
-  if (wallCamera.zoom >= 0.8 && item.depthLayer === 0) drawingContext.restore();
+  if (focused || (wallCamera.zoom >= 0.8 && item.depthLayer === 0)) drawingContext.restore();
 
   if (wallCamera.zoom >= 0.92 && item.depthLayer !== 2) {
     noStroke();
@@ -2761,6 +2849,52 @@ function drawWallFieldApple(d, item) {
     textSize(9);
     text(`#${item.archiveIndex + 1}`, item.size * 0.38, item.size * 0.28);
   }
+  pop();
+}
+
+function getWallRecordNumber(d, fallbackIndex) {
+  let value = Number(d && (d.apple_number !== undefined ? d.apple_number : d.appleNumber));
+  return Number.isFinite(value) ? value : fallbackIndex + 1;
+}
+
+function drawWallFocusedMetadata(d, item) {
+  let metaW = isMobileScreen() ? 116 : 142;
+  let metaH = isMobileScreen() ? 43 : 48;
+  let side = item.hasReflection
+    ? (item.noteX > item.x ? -1 : 1)
+    : (item.groupX < wallWorldBounds.x + wallWorldBounds.w / 2 ? 1 : -1);
+  let metaX = item.x + side * (item.size / 2 + metaW / 2 + 12);
+  let metaY = item.y;
+  let recordNumber = getWallRecordNumber(d, item.archiveIndex);
+  let promptLabel = getWallPromptShortLabel(getDrawingPromptIndex(d));
+  let seconds = Number(d && d.durationSeconds);
+  let durationLabel = Number.isFinite(seconds)
+    ? `${seconds.toFixed(seconds >= 100 ? 0 : 1)}s`
+    : "UNDATED";
+
+  push();
+  drawingContext.save();
+  drawingContext.shadowColor = "rgba(52, 45, 38, 0.09)";
+  drawingContext.shadowBlur = 8;
+  drawingContext.shadowOffsetY = 2;
+  fill(252, 250, 245, 238);
+  stroke(96, 89, 81, 70);
+  strokeWeight(0.8);
+  rect(metaX - metaW / 2, metaY - metaH / 2, metaW, metaH, 4);
+  drawingContext.restore();
+
+  noStroke();
+  fill(34, 31, 28, 225);
+  textAlign(LEFT, TOP);
+  textSize(isMobileScreen() ? 8.5 : 9.5);
+  text(`RECORD #${recordNumber}`, metaX - metaW / 2 + 10, metaY - metaH / 2 + 8);
+  fill(73, 67, 61, 180);
+  textSize(isMobileScreen() ? 7.5 : 8.5);
+  text(
+    `${promptLabel}  /  ${durationLabel}`,
+    metaX - metaW / 2 + 10,
+    metaY - metaH / 2 + 25
+  );
   pop();
 }
 
@@ -2871,7 +3005,7 @@ function drawWallFieldControls() {
     let boxX = last.x + last.w + 10;
     let boxY = last.y - 8;
     let boxW = isMobileScreen() ? 164 : 188;
-    let boxH = 66;
+    let boxH = 78;
     fill(252, 250, 245, 242);
     stroke(120, 112, 103, 55);
     rect(boxX, boxY, boxW, boxH, 6);
@@ -2880,7 +3014,7 @@ function drawWallFieldControls() {
     textAlign(LEFT, TOP);
     textSize(9.5);
     text(
-      "Two-finger swipe to explore\nPinch to zoom\nClick an apple to view its record",
+      "Two-finger swipe to explore\nPinch to zoom\nClick once to focus\nClick again to open record",
       boxX + 10,
       boxY + 10,
       boxW - 20,
@@ -2946,6 +3080,7 @@ function drawWallFieldMinimap() {
 }
 
 function recenterWallCameraFromMinimap(screenX, screenY) {
+  cancelWallFocusAnimation(false);
   let r = getWallFieldMinimapRect();
   let pad = 8;
   let worldX = map(
@@ -3036,6 +3171,7 @@ function getWallFieldControlAt(x, y) {
 }
 
 function handleWallFieldControl(control) {
+  cancelWallFocusAnimation(false);
   let frame = getWallFieldViewport();
   let cx = frame.x + frame.w / 2;
   let cy = frame.y + frame.h / 2;
@@ -3105,6 +3241,7 @@ function beginWallTouchGesture() {
 
 function updateWallTouchGesture() {
   if (touches.length < 2) return;
+  cancelWallFocusAnimation(false);
   let a = touches[0];
   let b = touches[1];
   let center = {
@@ -4616,12 +4753,23 @@ function handlePointerReleased() {
 
   if (isWallPanning) {
     if (wallDragDistance < 8) {
-      let hitIndex = isTopWallMode()
-        ? getWallFieldItemAt(wallPressPoint.x, wallPressPoint.y)
-        : getArchiveWallAppleAt(wallPressPoint.x, wallPressPoint.y);
-      if (hitIndex >= 0) {
-        selectArchiveDrawing(hitIndex);
+      if (isTopWallMode()) {
+        let hitIndex = getWallFieldItemAt(wallPressPoint.x, wallPressPoint.y);
+        if (hitIndex >= 0) {
+          if (wallFocusedAppleIndex === hitIndex && !wallFocusAnimation) {
+            selectArchiveDrawing(hitIndex);
+          } else if (wallFocusedAppleIndex !== hitIndex) {
+            focusWallFieldItem(hitIndex);
+          }
+        } else {
+          clearWallFieldFocus();
+        }
+      } else {
+        let hitIndex = getArchiveWallAppleAt(wallPressPoint.x, wallPressPoint.y);
+        if (hitIndex >= 0) selectArchiveDrawing(hitIndex);
       }
+    } else if (isTopWallMode()) {
+      clearWallFieldFocus();
     }
     isWallPanning = false;
   }
@@ -4752,6 +4900,10 @@ function handleDrawPageClick(x, y) {
   let switchMode = getViewSwitcherHit(x, y);
   if (switchMode) {
     archiveLastInteractionTime = millis();
+    if (switchMode !== "wall") {
+      wallFocusedAppleIndex = -1;
+      wallFocusAnimation = null;
+    }
     if (switchMode === "draw") {
       modalOpen = true;
       clearArchiveIdleTimer();
@@ -5074,6 +5226,7 @@ function mouseWheel(event) {
   if (isTopWallMode()) {
     let frame = getWallFieldViewport();
     if (pointInsideRect(mouseX, mouseY, frame) && !isClickOnViewSwitcher(mouseX, mouseY)) {
+      cancelWallFocusAnimation(false);
       if (event.ctrlKey) {
         let pinchDelta = event.deltaY !== undefined ? event.deltaY : event.delta;
         let zoomFactor = exp(-pinchDelta * 0.01);
