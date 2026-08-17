@@ -2287,7 +2287,7 @@ function getWallFieldViewport() {
 }
 
 function wallStableValue(d, index, salt) {
-  let source = String(
+  let source = "wall-layout-v2:" + String(
     (d && (d.dbId || d.id || d.createdAt)) ||
     index
   ) + ":" + salt;
@@ -2296,7 +2296,15 @@ function wallStableValue(d, index, salt) {
     hash ^= source.charCodeAt(i);
     hash = Math.imul(hash, 16777619);
   }
-  return (hash >>> 0) / 4294967295;
+
+  // Avalanche the FNV result so neighbouring salts do not produce
+  // correlated x/y values and visible diagonal bands in the wall layout.
+  hash ^= hash >>> 16;
+  hash = Math.imul(hash, 0x85ebca6b);
+  hash ^= hash >>> 13;
+  hash = Math.imul(hash, 0xc2b2ae35);
+  hash ^= hash >>> 16;
+  return (hash >>> 0) / 4294967296;
 }
 
 function getDrawingReflectionText(d) {
@@ -2365,10 +2373,15 @@ function generateWallMemoryFieldLayout() {
     let appleSize = lerp(mobile ? 42 : 48, mobile ? 66 : 82, wallStableValue(d, i, 1));
     let groupGap = mobile ? 12 : 18;
     let depthSeed = wallStableValue(d, i, 13);
-    let depthLayer = hasReflection ? 0 : (depthSeed < 0.2 ? 0 : (depthSeed < 0.58 ? 1 : 2));
-    // Every item in a plane shares one depth transform. This keeps records in
-    // the same readable layer from drifting into each other while zooming.
-    let depth = (mobile ? [0.94, 1.38, 1.96] : [0.9, 1.4, 2.05])[depthLayer];
+    let depthLayer = depthSeed < 0.28 ? 0 : (depthSeed < 0.65 ? 1 : 2);
+    let depthRanges = mobile
+      ? [[0.9, 1.08], [1.28, 1.58], [1.82, 2.22]]
+      : [[0.86, 1.08], [1.28, 1.62], [1.82, 2.3]];
+    let depth = lerp(
+      depthRanges[depthLayer][0],
+      depthRanges[depthLayer][1],
+      wallStableValue(d, i, 14)
+    );
     return {
       d: d,
       archiveIndex: i,
@@ -2384,16 +2397,23 @@ function generateWallMemoryFieldLayout() {
       depth: depth
     };
   });
-  let maxGroupW = max(items.map(item => item.groupW));
-  let maxGroupH = max(items.map(item => item.groupH));
-  let cellW = max(mobile ? 224 : 292, maxGroupW + (mobile ? 38 : 58));
-  let cellH = max(mobile ? 166 : 198, maxGroupH + (mobile ? 38 : 54));
-  let columns = max(mobile ? 4 : 6, ceil(sqrt(count * (mobile ? 1.15 : 1.55))));
-  let rows = ceil(count / columns);
-  // Give the archive enough two-dimensional breathing room for true random
-  // placement. A denser field forces the fallback into visible rows.
-  let worldW = max(frame.w * (mobile ? 2.25 : 2.0), columns * cellW * 1.18);
-  let worldH = max(frame.h * (mobile ? 2.15 : 1.8), rows * cellH * 1.3);
+  let placementGapX = mobile ? 34 : 54;
+  let placementGapY = mobile ? 30 : 46;
+  let totalPlacementArea = items.reduce((sum, item) => {
+    return sum +
+      (item.groupW + placementGapX) *
+      (item.groupH + placementGapY);
+  }, 0);
+  let worldAspect = constrain(frame.w / max(1, frame.h), 1.25, 2.1);
+  let targetWorldArea = totalPlacementArea / (mobile ? 0.27 : 0.3);
+  let worldW = max(
+    frame.w * (mobile ? 2.1 : 1.85),
+    sqrt(targetWorldArea * worldAspect)
+  );
+  let worldH = max(
+    frame.h * (mobile ? 2.0 : 1.65),
+    targetWorldArea / worldW
+  );
   let centerX = frame.x + frame.w / 2;
   let centerY = frame.y + frame.h / 2;
 
@@ -2404,14 +2424,13 @@ function generateWallMemoryFieldLayout() {
     h: worldH
   };
 
-  // Place reflection records first, then fill the remaining space with apples.
-  // Collision boxes include float clearance and are shared across depth planes,
-  // so the overview never starts with one plane sitting on top of another.
+  // Place larger reflection groups first. Spatial placement is entirely 2D;
+  // depth is applied only later by the renderer.
   let positionedItems = new Array(count);
   let occupied = [];
   let placementOrder = items.slice().sort((a, b) => {
     if (a.hasReflection !== b.hasReflection) return a.hasReflection ? -1 : 1;
-    return a.depthLayer - b.depthLayer;
+    return b.groupW * b.groupH - a.groupW * a.groupH;
   });
 
   for (let placementIndex = 0; placementIndex < placementOrder.length; placementIndex++) {
@@ -2425,18 +2444,19 @@ function generateWallMemoryFieldLayout() {
     let noteW = noteMetrics.w;
     let noteH = noteMetrics.h;
     let noteSide = itemData.noteSide;
-    let depthScale = 1 / itemData.depth;
-    let depthT = constrain(map(itemData.depth, 0.8, 2.32, 0, 1), 0, 1);
-    let parallax = lerp(1.03, 0.56, depthT);
-    let projectedW = itemData.groupW * depthScale + (mobile ? 68 : 104);
-    let projectedH = itemData.groupH * depthScale + (mobile ? 60 : 88);
     let groupX = centerX;
     let groupY = centerY;
     let chosenBox = null;
+    let bestCandidate = null;
+    let bestScore = -Infinity;
+    let boxW = itemData.groupW + placementGapX;
+    let boxH = itemData.groupH + placementGapY;
 
-    for (let attempt = 0; attempt < 640; attempt++) {
-      let edgePadX = itemData.groupW / 2 + (mobile ? 24 : 38);
-      let edgePadY = itemData.groupH / 2 + (mobile ? 24 : 34);
+    // Best-candidate sampling produces an irregular Poisson-like field without
+    // rows, rays, rings or a geometric fallback pattern.
+    for (let attempt = 0; attempt < 420; attempt++) {
+      let edgePadX = boxW / 2 + (mobile ? 16 : 24);
+      let edgePadY = boxH / 2 + (mobile ? 16 : 24);
       let candidateX = lerp(
         wallWorldBounds.x + edgePadX,
         wallWorldBounds.x + wallWorldBounds.w - edgePadX,
@@ -2447,21 +2467,34 @@ function generateWallMemoryFieldLayout() {
         wallWorldBounds.y + wallWorldBounds.h - edgePadY,
         wallStableValue(d, i, 101 + attempt * 2)
       );
-      let projectedX = centerX + (candidateX - centerX) * parallax;
-      let projectedY = centerY + (candidateY - centerY) * parallax;
       let candidateBox = {
-        left: projectedX - projectedW / 2,
-        right: projectedX + projectedW / 2,
-        top: projectedY - projectedH / 2,
-        bottom: projectedY + projectedH / 2,
-        depthLayer: itemData.depthLayer
+        left: candidateX - boxW / 2,
+        right: candidateX + boxW / 2,
+        top: candidateY - boxH / 2,
+        bottom: candidateY + boxH / 2
       };
-      let collides = occupied.some(box => !(
-        candidateBox.right < box.left ||
-        candidateBox.left > box.right ||
-        candidateBox.bottom < box.top ||
-        candidateBox.top > box.bottom
-      ));
+      let collides = false;
+      let minimumDistance = Infinity;
+      let overlapArea = 0;
+      for (let box of occupied) {
+        let overlapW = max(0, min(candidateBox.right, box.right) - max(candidateBox.left, box.left));
+        let overlapH = max(0, min(candidateBox.bottom, box.bottom) - max(candidateBox.top, box.top));
+        if (overlapW > 0 && overlapH > 0) {
+          collides = true;
+          overlapArea += overlapW * overlapH;
+        }
+        let boxCenterX = (box.left + box.right) / 2;
+        let boxCenterY = (box.top + box.bottom) / 2;
+        minimumDistance = min(
+          minimumDistance,
+          dist(candidateX, candidateY, boxCenterX, boxCenterY)
+        );
+      }
+      let candidateScore = (occupied.length === 0 ? 0 : minimumDistance) - overlapArea * 100;
+      if (candidateScore > bestScore) {
+        bestScore = candidateScore;
+        bestCandidate = { x: candidateX, y: candidateY, box: candidateBox };
+      }
       if (!collides) {
         groupX = candidateX;
         groupY = candidateY;
@@ -2471,75 +2504,20 @@ function generateWallMemoryFieldLayout() {
     }
 
     if (!chosenBox) {
-      // Rare overflow continues outwards in two dimensions. This avoids the
-      // old emergency row that made reflection cards look intentionally lined up.
-      let goldenAngle = PI * (3 - sqrt(5));
-      let startRadius = max(worldW, worldH) * 0.48;
-      for (let attempt = 0; attempt < 2400; attempt++) {
-        let radius = startRadius + sqrt(attempt + 1) * max(projectedW, projectedH) * 0.72;
-        let angle = (attempt + wallStableValue(d, i, 701)) * goldenAngle;
-        let candidateX = centerX + cos(angle) * radius * 1.18;
-        let candidateY = centerY + sin(angle) * radius * 0.82;
-        let projectedX = centerX + (candidateX - centerX) * parallax;
-        let projectedY = centerY + (candidateY - centerY) * parallax;
-        let candidateBox = {
-          left: projectedX - projectedW / 2,
-          right: projectedX + projectedW / 2,
-          top: projectedY - projectedH / 2,
-          bottom: projectedY + projectedH / 2,
-          depthLayer: itemData.depthLayer
-        };
-        let collides = occupied.some(box => !(
-          candidateBox.right < box.left ||
-          candidateBox.left > box.right ||
-          candidateBox.bottom < box.top ||
-          candidateBox.top > box.bottom
-        ));
-        if (!collides) {
-          groupX = candidateX;
-          groupY = candidateY;
-          chosenBox = candidateBox;
-          break;
-        }
-      }
-    }
-
-    if (!chosenBox) {
-      // The search space above is intentionally generous. Keep a deterministic
-      // final position only as a last-resort guard against malformed dimensions.
-      let angle = (placementIndex + 1) * PI * (3 - sqrt(5));
-      let radius = max(worldW, worldH) + (placementIndex + 1) * max(cellW, cellH);
-      groupX = centerX + cos(angle) * radius;
-      groupY = centerY + sin(angle) * radius;
-      let projectedX = centerX + (groupX - centerX) * parallax;
-      let projectedY = centerY + (groupY - centerY) * parallax;
-      chosenBox = {
-        left: projectedX - projectedW / 2,
-        right: projectedX + projectedW / 2,
-        top: projectedY - projectedH / 2,
-        bottom: projectedY + projectedH / 2,
-        depthLayer: itemData.depthLayer
-      };
+      // Use the most isolated sampled point rather than introducing a visible
+      // grid, spiral, ring or overflow row.
+      groupX = bestCandidate ? bestCandidate.x : centerX;
+      groupY = bestCandidate ? bestCandidate.y : centerY;
+      chosenBox = bestCandidate
+        ? bestCandidate.box
+        : {
+            left: groupX - boxW / 2,
+            right: groupX + boxW / 2,
+            top: groupY - boxH / 2,
+            bottom: groupY + boxH / 2
+          };
     }
     occupied.push(chosenBox);
-
-    let groupPad = mobile ? 54 : 80;
-    let nextLeft = min(wallWorldBounds.x, groupX - itemData.groupW / 2 - groupPad);
-    let nextTop = min(wallWorldBounds.y, groupY - itemData.groupH / 2 - groupPad);
-    let nextRight = max(
-      wallWorldBounds.x + wallWorldBounds.w,
-      groupX + itemData.groupW / 2 + groupPad
-    );
-    let nextBottom = max(
-      wallWorldBounds.y + wallWorldBounds.h,
-      groupY + itemData.groupH / 2 + groupPad
-    );
-    wallWorldBounds = {
-      x: nextLeft,
-      y: nextTop,
-      w: nextRight - nextLeft,
-      h: nextBottom - nextTop
-    };
 
     let x = hasReflection
       ? groupX - noteSide * (noteW + itemData.groupGap) / 2
@@ -2676,7 +2654,6 @@ function drawWallMemoryField() {
     drawWallFieldApple(d, item);
     if (
       item.hasReflection &&
-      item.depthLayer === 0 &&
       wallCamera.zoom >= 0.5 &&
       pose.visibility > 0.08
     ) {
@@ -2730,7 +2707,7 @@ function wallFieldItemVisibleOnScreen(item, pose, frame) {
   let right = pose.x + item.size * scaleValue / 2;
   let top = pose.y - item.size * scaleValue / 2;
   let bottom = pose.y + item.size * scaleValue / 2;
-  if (item.hasReflection && item.depthLayer === 0 && wallCamera.zoom >= 0.5) {
+  if (item.hasReflection && wallCamera.zoom >= 0.5) {
     let noteX = pose.x + (item.noteX - item.x) * scaleValue;
     let noteY = pose.y + (item.noteY - item.y) * scaleValue;
     left = min(left, noteX - item.noteW * scaleValue / 2);
