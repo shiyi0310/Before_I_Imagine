@@ -151,8 +151,10 @@ let archiveReplayLoading = {};
 let archiveReplayMiniBuffer = null;
 let archiveReplayMiniBufferSize = { w: 0, h: 0 };
 let replaySimplifiedDrawingCache = new WeakMap();
+let archiveFilmRowItemsCache = [[], [], [], []];
+let archiveFilmLoopWidthCache = [0, 0, 0, 0];
 const ARCHIVE_IDLE_DELAY = 25000;
-const ENABLE_ARCHIVE_IDLE_AUTOPLAY = true;
+const ENABLE_ARCHIVE_IDLE_AUTOPLAY = false;
 let archiveMode = "explore";
 let archiveIsPaused = false;
 let archiveLastInteractionTime = 0;
@@ -355,7 +357,7 @@ function updatePerformanceFrameRate() {
   } else if (page === "draw" && modalOpen) {
     targetRate = currentAction ? 60 : 45;
   } else if (page === "draw" && !modalOpen && backgroundViewMode === "archive") {
-    targetRate = 30;
+    targetRate = 15;
   } else if (page === "draw" && !modalOpen && backgroundViewMode === "wall") {
     targetRate = 18;
   } else if (page === "draw" && !modalOpen) {
@@ -1485,6 +1487,8 @@ function formatRelativeArchiveTime(d, index) {
 
 function generateDrawBackgroundApplesLayout() {
   drawBackgroundApplesLayout = [];
+  archiveFilmRowItemsCache = [[], [], [], []];
+  archiveFilmLoopWidthCache = [0, 0, 0, 0];
   if (archive.length === 0) return;
 
   drawLayout = getDrawingLayout();
@@ -1558,6 +1562,8 @@ function generateDrawBackgroundApplesLayout() {
       alpha: random(0.5, 0.82)
     });
   }
+
+  rebuildArchiveFilmLayoutCache();
 }
 
 function getDrawBackgroundProtectedZones() {
@@ -1597,8 +1603,10 @@ function drawFloatingArchiveApples() {
   if (drawBackgroundApplesLayout.length === 0) generateDrawBackgroundApplesLayout();
 
   let mobile = isMobileScreen();
+  let isArchiveMode = backgroundViewMode === "archive";
+  let archiveVisibleFrame = isArchiveMode ? getArchiveVisibleRowFrame() : null;
 
-  if (backgroundViewMode === "archive") {
+  if (isArchiveMode) {
     updateArchiveFilmReplay();
   }
 
@@ -1612,7 +1620,6 @@ function drawFloatingArchiveApples() {
       }
     }
 
-    let isArchiveMode = backgroundViewMode === "archive";
     let t = millis() * item.speed + item.phase;
     let floatX = mobile ? sin(t * 0.6) * item.drift * 0.35 : sin(t * 0.8) * item.drift;
     let floatY = mobile ? cos(t * 0.6) * item.drift * 0.35 : cos(t) * item.drift;
@@ -1629,6 +1636,17 @@ function drawFloatingArchiveApples() {
     let drawRotation = isArchiveMode ? 0 : lerp(item.scatterRotation, item.archiveRotation, archiveTransition);
     let drawSize = isArchiveMode ? item.archiveW : lerp(item.size, item.archiveW, archiveTransition);
     let cardH = isArchiveMode ? item.archiveH : lerp(item.size, item.archiveH, archiveTransition);
+    if (
+      isArchiveMode &&
+      (
+        drawX + drawSize / 2 < archiveVisibleFrame.x ||
+        drawX - drawSize / 2 > archiveVisibleFrame.x + archiveVisibleFrame.w ||
+        drawY + cardH / 2 < archiveVisibleFrame.y ||
+        drawY - cardH / 2 > archiveVisibleFrame.y + archiveVisibleFrame.h
+      )
+    ) {
+      continue;
+    }
     let hovered = isArchiveMode && archiveCardHitTest(mouseX, mouseY, item, drawX, drawY, drawSize, cardH);
     item.lift = 0;
 
@@ -1669,10 +1687,10 @@ function getArchiveFilmDrawOffsets(item) {
   let rowPan = archiveRowPan[item.rowIndex] || 0;
   let offsets = [];
   let frame = getArchiveVisibleRowFrame();
-  let left = frame.x - item.archiveX - rowPan - item.archiveW;
-  let right = frame.x + frame.w - item.archiveX - rowPan + item.archiveW;
-  let firstLoop = floor(left / cycleW) - 1;
-  let lastLoop = ceil(right / cycleW) + 1;
+  let baseX = item.archiveX + rowPan;
+  let halfW = item.archiveW / 2;
+  let firstLoop = ceil((frame.x - halfW - baseX) / cycleW);
+  let lastLoop = floor((frame.x + frame.w + halfW - baseX) / cycleW);
   for (let k = firstLoop; k <= lastLoop; k++) {
     offsets.push(k * cycleW);
   }
@@ -3659,22 +3677,29 @@ function ensureArchiveFilmReplayState() {
 }
 
 function getArchiveFilmRowItems(rowIndex) {
-  return drawBackgroundApplesLayout
-    .filter(item => item.rowIndex === rowIndex)
-    .sort((a, b) => a.archiveX - b.archiveX);
+  return archiveFilmRowItemsCache[rowIndex] || [];
 }
 
 function getArchiveFilmLoopWidth(rowIndex = -1) {
-  let metrics = getArchiveFilmMetrics();
   if (rowIndex >= 0) {
-    let rowCount = max(1, getArchiveFilmRowItems(rowIndex).length);
-    return rowCount * metrics.stepX;
+    return archiveFilmLoopWidthCache[rowIndex] || getArchiveFilmMetrics().stepX;
   }
-  let maxCount = 1;
-  for (let row = 0; row < 4; row++) {
-    maxCount = max(maxCount, getArchiveFilmRowItems(row).length);
+  return max(getArchiveFilmMetrics().stepX, ...archiveFilmLoopWidthCache);
+}
+
+function rebuildArchiveFilmLayoutCache() {
+  let rows = [[], [], [], []];
+  for (let item of drawBackgroundApplesLayout) {
+    let rowIndex = Number(item.rowIndex);
+    if (rowIndex >= 0 && rowIndex < rows.length) rows[rowIndex].push(item);
   }
-  return maxCount * metrics.stepX;
+
+  let stepX = getArchiveFilmMetrics().stepX;
+  for (let row = 0; row < rows.length; row++) {
+    rows[row].sort((a, b) => a.archiveX - b.archiveX);
+    archiveFilmLoopWidthCache[row] = max(1, rows[row].length) * stepX;
+  }
+  archiveFilmRowItemsCache = rows;
 }
 
 function archiveFilmItemVisible(item) {
