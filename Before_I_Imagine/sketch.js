@@ -3144,7 +3144,9 @@ function drawWallFieldControls() {
     textAlign(LEFT, TOP);
     textSize(9.5);
     text(
-      "Two-finger swipe to explore\nPinch to zoom\nClick once to focus\nClick again to open record",
+      isMobileScreen()
+        ? "One-finger drag to explore\nPinch to zoom\nTap once to focus\nTap again to open record"
+        : "Two-finger swipe to explore\nPinch to zoom\nClick once to focus\nClick again to open record",
       boxX + 10,
       boxY + 10,
       boxW - 20,
@@ -4735,6 +4737,22 @@ function touchMoved() {
 
   if (wallTouchGestureActive) {
     endWallTouchGesture();
+    return false;
+  }
+
+  if (isTopWallMode() && isMobileScreen() && touches.length === 1 && isWallPanning) {
+    let x = touches[0].x;
+    let y = touches[0].y;
+    let dx = x - lastWallPanPoint.x;
+    let dy = y - lastWallPanPoint.y;
+    wallCamera.x += dx / wallCamera.zoom;
+    wallCamera.y += dy / wallCamera.zoom;
+    wallDragDistance += abs(dx) + abs(dy);
+    if (wallDragDistance >= 8) clearWallFocusForManualCamera();
+    lastWallPanPoint = { x: x, y: y };
+    wallCameraInitialized = true;
+    constrainTopWallCamera();
+    requestRender("wall-one-finger-pan");
     return false;
   }
 
