@@ -1083,7 +1083,7 @@ function drawImmersiveDrawingPage() {
     drawReopenDrawingButton();
   }
 
-  if (!modalOpen && (backgroundViewMode === "archive" || backgroundViewMode === "wall")) {
+  if (!modalOpen && backgroundViewMode === "wall") {
     drawSelectedApplePopup();
   }
 
@@ -4662,17 +4662,6 @@ function mouseMoved() {
   }
 }
 
-function mouseClicked() {
-  if (isMobileArchiveMode() && !isClickOnViewSwitcher(mouseX, mouseY)) {
-    if (getMobileArchiveOutlierButtonAt(mouseX, mouseY) >= 0) return false;
-    let hitIndex = getMobileArchiveCardAt(mouseX, mouseY);
-    if (hitIndex >= 0) {
-      selectArchiveDrawing(hitIndex);
-      return false;
-    }
-  }
-}
-
 function touchStarted() {
   requestRender("touch-started");
   if (reflectionModalOpen) {
@@ -4953,11 +4942,6 @@ function handlePointerReleased() {
       let outlierIndex = getArchiveOutlierButtonAt(archiveRowPressPoint.x, archiveRowPressPoint.y);
       if (outlierIndex >= 0) {
         toggleDrawingOutlier(outlierIndex);
-      } else {
-        let hitIndex = isMobileScreen()
-          ? getMobileArchiveCardAt(archiveRowPressPoint.x, archiveRowPressPoint.y)
-          : getArchiveModeCardAt(archiveRowPressPoint.x, archiveRowPressPoint.y);
-        if (hitIndex >= 0) selectArchiveDrawing(hitIndex);
       }
     }
     if (abs(archiveRowVelocity[archiveRowDragIndex] || 0) < 0.02) {
@@ -4995,9 +4979,6 @@ function handlePointerReleased() {
       let outlierIndex = getMobileArchiveOutlierButtonAt(mobileArchivePressPoint.x, mobileArchivePressPoint.y);
       if (outlierIndex >= 0) {
         toggleDrawingOutlier(outlierIndex);
-      } else {
-        let hitIndex = getMobileArchiveCardAt(mobileArchivePressPoint.x, mobileArchivePressPoint.y);
-        if (hitIndex >= 0) selectArchiveDrawing(hitIndex);
       }
     }
     isArchivePanning = false;
@@ -5116,6 +5097,10 @@ function handleDrawPageClick(x, y) {
   let switchMode = getViewSwitcherHit(x, y);
   if (switchMode) {
     archiveLastInteractionTime = millis();
+    if (switchMode === "archive") {
+      selectedApple = null;
+      selectedAppleIndex = -1;
+    }
     if (switchMode !== "wall") {
       cancelWallHelpAutoHide();
       wallHelpVisible = false;
