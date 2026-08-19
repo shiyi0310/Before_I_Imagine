@@ -3146,7 +3146,7 @@ function drawWallFieldControls() {
     text(
       isMobileScreen()
         ? "One-finger drag to explore\nPinch to zoom\nTap once to focus\nTap again to open record"
-        : "Two-finger swipe to explore\nPinch to zoom\nClick once to focus\nClick again to open record",
+        : "Left-drag to explore\nMouse wheel to zoom\nClick once to focus\nClick again to open record",
       boxX + 10,
       boxY + 10,
       boxW - 20,
@@ -4639,6 +4639,10 @@ function drawDrawingFooter() {
 // -------------------------
 
 function mousePressed() {
+  if (isTopWallMode() && mouseButton !== LEFT) {
+    requestRender("wall-non-left-press");
+    return false;
+  }
   handlePointerPressed(mouseX, mouseY);
   requestRender("mouse-pressed");
 }
@@ -4870,9 +4874,14 @@ function handlePointerDragged(x, y) {
   if (isWallPanning && isTopWallMode()) {
     let dx = x - lastWallPanPoint.x;
     let dy = y - lastWallPanPoint.y;
+    wallCamera.x += dx / wallCamera.zoom;
+    wallCamera.y += dy / wallCamera.zoom;
     wallDragDistance += abs(dx) + abs(dy);
     if (wallDragDistance >= 8) clearWallFocusForManualCamera();
     lastWallPanPoint = { x: x, y: y };
+    wallCameraInitialized = true;
+    constrainTopWallCamera();
+    requestRender("wall-left-drag");
     return false;
   }
 
@@ -5431,20 +5440,11 @@ function mouseWheel(event) {
     let frame = getWallFieldViewport();
     if (pointInsideRect(mouseX, mouseY, frame) && !isClickOnViewSwitcher(mouseX, mouseY)) {
       clearWallFocusForManualCamera();
-      if (event.ctrlKey) {
-        let pinchDelta = event.deltaY !== undefined ? event.deltaY : event.delta;
-        let zoomFactor = exp(-pinchDelta * 0.01);
-        zoomTopWallCameraAt(mouseX, mouseY, zoomFactor);
-        requestRender("wall-pinch");
-      } else {
-        let dx = Number(event.deltaX) || 0;
-        let dy = Number(event.deltaY !== undefined ? event.deltaY : event.delta) || 0;
-        wallCamera.x -= dx / wallCamera.zoom;
-        wallCamera.y -= dy / wallCamera.zoom;
-        wallCameraInitialized = true;
-        constrainTopWallCamera();
-        requestRender("wall-two-finger-pan");
-      }
+      let wheelDelta = Number(event.deltaY !== undefined ? event.deltaY : event.delta) || 0;
+      let zoomSensitivity = event.ctrlKey ? 0.01 : 0.0016;
+      let zoomFactor = exp(-wheelDelta * zoomSensitivity);
+      zoomTopWallCameraAt(mouseX, mouseY, zoomFactor);
+      requestRender(event.ctrlKey ? "wall-pinch" : "wall-wheel-zoom");
       return false;
     }
   }
