@@ -5835,6 +5835,7 @@ function openReflectionModal(savedDrawing) {
   if (reflectionTextArea) reflectionTextArea.value("");
   layoutReflectionInterface();
   updateReflectionVisibility();
+  requestRender("reflection-open");
 }
 
 async function handleReflectionChoice(shouldSaveText) {
@@ -5853,6 +5854,7 @@ async function handleReflectionChoice(shouldSaveText) {
   } catch (error) {
     console.warn("Could not save reflection:", error);
     reflectionError = "Could not save this reflection. Please try again or skip.";
+    requestRender("reflection-error");
   } finally {
     reflectionUpdating = false;
   }
@@ -5895,6 +5897,7 @@ function closeReflectionModalAndAdvance() {
   if (reflectionTextArea) reflectionTextArea.value("");
   updateReflectionVisibility();
   advancePrompt();
+  requestRender("reflection-close");
 }
 
 function advancePrompt() {
