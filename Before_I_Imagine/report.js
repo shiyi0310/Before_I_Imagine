@@ -67,7 +67,7 @@ function drawAppleReportView() {
   let layout = getAppleReportLayout();
   ensureAppleReportSimilarity();
   let personalDrawings = prompts.map((_, index) => {
-    return getReportPersonalDrawing(index) || getLatestReportDrawing(index);
+    return getReportPersonalDrawing(index);
   });
 
   noStroke();
@@ -318,13 +318,6 @@ function drawAppleReportPrintButton(button) {
   text(label, button.x + button.w / 2, y + innerH / 2);
 }
 
-function getLatestReportDrawing(promptNumber) {
-  for (let i = archive.length - 1; i >= 0; i--) {
-    if (getDrawingPromptIndex(archive[i]) === promptNumber) return archive[i];
-  }
-  return null;
-}
-
 function getReportCollectiveDrawing(promptNumber, personalDrawing) {
   return getReportRepresentativeDrawing(promptNumber);
 }
@@ -384,7 +377,7 @@ async function printCurrentAppleReport() {
 
 function buildAppleReportPrintPayload() {
   let personalDrawings = prompts.map((_, index) => {
-    return getReportPersonalDrawing(index) || getLatestReportDrawing(index);
+    return getReportPersonalDrawing(index);
   });
   let latest = personalDrawings.filter(Boolean).sort((a, b) => {
     return new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime();
