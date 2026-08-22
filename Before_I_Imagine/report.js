@@ -79,7 +79,12 @@ function drawAppleReportView() {
 
   textSize(layout.mobile ? 9 : 12);
   fill(72, 67, 61);
-  text("Personal Apple  ↔  Collective Apple", layout.innerX, layout.headerY + (layout.mobile ? 25 : 34));
+  text(
+    "Default → Collective  ·  Touch / Taste / Imperfect → Your Default",
+    layout.innerX,
+    layout.headerY + (layout.mobile ? 25 : 34),
+    layout.innerW
+  );
 
   stroke(150, 142, 132, 95);
   strokeWeight(1);
@@ -93,7 +98,8 @@ function drawAppleReportView() {
     fill(72, 67, 61);
     textSize(9);
     text(
-      "A comparison between your remembered apples\nand the collective trace from all participants.",
+      "Default is compared with the collective archive.\n" +
+      "Touch, taste, and imperfect apples are compared with your Default Apple.",
       layout.innerX,
       layout.headerY + 70
     );
@@ -145,6 +151,11 @@ function drawAppleReportCard(card, promptNumber, personalDrawing) {
   let representative = getReportRepresentativeDrawing(promptNumber);
   let score = getReportSimilarityScore(promptNumber);
   let hasCloseMatch = hasCloseReportMatch(promptNumber);
+  let hasSimilarity = Number.isFinite(score);
+  let showNumericScore = hasSimilarity && (promptNumber !== 0 || hasCloseMatch);
+  let comparisonLabel = promptNumber === 0
+    ? "Closest Collective Apple"
+    : "Your Default Apple";
   let pad = mobile ? 9 : 14;
   let imageH = mobile ? 56 : constrain(card.h * 0.25, 82, 118);
   let title = ["DEFAULT APPLE", "TOUCH MEMORY", "TASTE MEMORY", "IMPERFECT MEMORY"][promptNumber];
@@ -187,9 +198,9 @@ function drawAppleReportCard(card, promptNumber, personalDrawing) {
   textSize(mobile ? 6 : 7);
   text("Similarity", card.x + card.w / 2, similarityY);
   fill(inkCol);
-  textSize(hasCloseMatch ? (mobile ? 15 : 21) : (mobile ? 7 : 9));
-  let scoreText = Number.isFinite(score)
-    ? (hasCloseMatch ? `${round(score)}%` : "NO CLOSE MATCH")
+  textSize(showNumericScore ? (mobile ? 15 : 21) : (mobile ? 7 : 9));
+  let scoreText = hasSimilarity
+    ? (showNumericScore ? `${round(score)}%` : "NO CLOSE MATCH")
     : "--%";
   text(scoreText, card.x + card.w / 2, similarityY + (mobile ? 9 : 12));
 
@@ -197,13 +208,15 @@ function drawAppleReportCard(card, promptNumber, personalDrawing) {
   stroke(190, 182, 171, 85);
   line(card.x + pad, collectiveY - 6, card.x + card.w - pad, collectiveY - 6);
   drawAppleReportImageSlot(
-    hasCloseMatch ? representative : null,
-    "Collective Apple",
+    showNumericScore ? representative : null,
+    comparisonLabel,
     card.x + pad,
     collectiveY,
     card.w - pad * 2,
     imageH,
-    hasCloseMatch ? "image pending" : "no close archive match"
+    showNumericScore
+      ? "image pending"
+      : (promptNumber === 0 ? "no close archive match" : "default apple unavailable")
   );
 }
 
@@ -254,14 +267,20 @@ function drawAppleReportSummary(summary, personalDrawings) {
   text("APPLE REPORT", summary.x + 14, summary.y + 12);
   text("REFLECTION", splitX + 14, summary.y + 12);
 
-  let names = ["DEFAULT APPLE", "TOUCH MEMORY", "TASTE MEMORY", "IMPERFECT MEMORY"];
+  let names = [
+    "DEFAULT ↔ COLLECTIVE",
+    "TOUCH ↔ YOUR DEFAULT",
+    "TASTE ↔ YOUR DEFAULT",
+    "IMPERFECT ↔ YOUR DEFAULT"
+  ];
   textSize(mobile ? 5.5 : 7.5);
   for (let i = 0; i < names.length; i++) {
     let rowY = summary.y + 30 + i * (mobile ? 13 : 14);
     text(names[i], summary.x + 14, rowY);
     let score = getReportSimilarityScore(i);
+    let showNumericScore = Number.isFinite(score) && (i !== 0 || hasCloseReportMatch(i));
     let summaryScore = Number.isFinite(score)
-      ? (hasCloseReportMatch(i) ? `${round(score)}%` : "NO MATCH")
+      ? (showNumericScore ? `${round(score)}%` : "NO MATCH")
       : "--%";
     text(summaryScore, splitX - 52, rowY);
   }
@@ -388,11 +407,11 @@ function buildAppleReportPrintPayload() {
       .map((entry) => `${entry.number} ${entry.prompt}\n${entry.text}`)
       .join("\n\n"),
     apples: personalDrawings.map((drawing, index) => {
+      let score = getReportSimilarityScore(index);
+      let includeScore = Number.isFinite(score) && (index !== 0 || hasCloseReportMatch(index));
       return {
         prompt: promptNames[index],
-        similarity: hasCloseReportMatch(index)
-          ? getReportSimilarityScore(index)
-          : null,
+        similarity: includeScore ? score : null,
         appleNumber: getReportPrintAppleNumber(drawing),
         imageUrl: getReportPrintImageUrl(drawing)
       };

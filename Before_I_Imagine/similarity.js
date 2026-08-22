@@ -228,6 +228,25 @@ async function buildAppleReportSimilarity(buildKey) {
       }
     }
 
+    // The Default Apple keeps the existing collective-archive comparison.
+    // The three prompted variations use this participant's own Default Apple
+    // as their baseline, so the score describes change within one session.
+    if (promptIndex > 0) {
+      let defaultDrawing = reportPersonalDrawings[0];
+      let personalMask = personalDrawing ? createReportDrawingMask(personalDrawing) : null;
+      let defaultMask = defaultDrawing ? createReportDrawingMask(defaultDrawing) : null;
+
+      reportRepresentativeDrawings[promptIndex] = defaultDrawing || null;
+      if (personalMask && defaultMask) {
+        setReportSimilarityScore(
+          promptIndex,
+          findBestReportShapeScore(personalMask.mask, defaultMask.mask)
+        );
+      }
+      await yieldSimilarityWork();
+      continue;
+    }
+
     let collective = buildReportCollectiveMask(candidates);
     let personalMask = personalDrawing ? createReportDrawingMask(personalDrawing) : null;
     if (personalMask && candidates.length > 0) {
