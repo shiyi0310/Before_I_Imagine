@@ -275,7 +275,7 @@ app.post("/api/drawings", async (req, res) => {
     return res.status(500).json({ error: error.message });
   }
 
-  const moderationStatus = await moderateDrawingImage(data.id, imageUrl);
+  const moderationStatus = await moderateDrawingImage(data.id, thumbUrl);
   return res.status(201).json(attachDatabaseFields({
     ...data,
     moderation_status: moderationStatus
