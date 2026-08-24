@@ -8,6 +8,24 @@ const { createClient } = require("@supabase/supabase-js");
 const app = express();
 const PORT = process.env.PORT || 3000;
 const OPENAI_MODERATION_MODEL = "omni-moderation-2024-09-26";
+const BLOCKED_REFLECTION_PATTERNS = [
+  {
+    category: "sexual",
+    pattern: /\b(?:sex|sexual|porn|pornography|porno|nude|naked|penis|dick|cock|vagina|pussy|boobs?|breasts?|blowjob|masturbat(?:e|ion|ing))\b/i
+  },
+  {
+    category: "sexual",
+    pattern: /(?:色情|黄色内容|黄色网站|黄网|黄片|性爱|做爱|裸体|裸照|阴茎|鸡巴|屌|阴道|逼|乳房|奶子)/i
+  },
+  {
+    category: "violence",
+    pattern: /\b(?:blood|bloody|gore|gory|murder|murdered|killing|killed|kill)\b/i
+  },
+  {
+    category: "violence",
+    pattern: /(?:血腥|流血|暴力|谋杀|杀人|杀死|尸体|肢解)/i
+  }
+];
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY;
@@ -107,15 +125,32 @@ async function uploadDrawingImage(dataURL, prefix, drawingId) {
   return data && data.publicUrl ? data.publicUrl : null;
 }
 
-async function moderateDrawingImage(drawingId, imageInput) {
-  console.log(`[Moderation] Checking drawing ID ${drawingId} ...`);
+function findBlockedReflectionCategory(text) {
+  if (typeof text !== "string" || !text.trim()) return null;
+  const match = BLOCKED_REFLECTION_PATTERNS.find(item => item.pattern.test(text));
+  return match ? match.category : null;
+}
+
+function formatModerationScores(scores) {
+  if (!scores || typeof scores !== "object") return "unavailable";
+  return Object.entries(scores)
+    .filter(([, score]) => typeof score === "number")
+    .map(([category, score]) => {
+      const value = score > 0 && score < 0.0001 ? score.toExponential(3) : score.toFixed(4);
+      return `${category}=${value}`;
+    })
+    .join(", ");
+}
+
+async function moderateDrawingContent(drawingId, input, inputLabel, safeStatus = "approved") {
+  console.log(`[Moderation] Checking ${inputLabel} for drawing ID ${drawingId} ...`);
 
   if (!process.env.OPENAI_API_KEY) {
     console.error(`[Moderation] Failed, keeping pending drawing ID ${drawingId}: OPENAI_API_KEY is not configured.`);
     return "pending";
   }
-  if (!imageInput) {
-    console.error(`[Moderation] Failed, keeping pending drawing ID ${drawingId}: no image input.`);
+  if (!input) {
+    console.error(`[Moderation] Failed, keeping pending drawing ID ${drawingId}: no ${inputLabel} input.`);
     return "pending";
   }
 
@@ -128,10 +163,7 @@ async function moderateDrawingImage(drawingId, imageInput) {
       },
       body: JSON.stringify({
         model: OPENAI_MODERATION_MODEL,
-        input: [{
-          type: "image_url",
-          image_url: { url: imageInput }
-        }]
+        input
       }),
       signal: AbortSignal.timeout(20000)
     });
@@ -142,12 +174,15 @@ async function moderateDrawingImage(drawingId, imageInput) {
     }
 
     const result = await response.json();
-    const flagged = result && result.results && result.results[0] && result.results[0].flagged;
+    const moderationResult = result && result.results && result.results[0];
+    const flagged = moderationResult && moderationResult.flagged;
     if (typeof flagged !== "boolean") {
       throw new Error("OpenAI Moderation API returned an unexpected response.");
     }
 
-    const moderationStatus = flagged ? "rejected" : "approved";
+    console.log(`[Moderation] Scores ${inputLabel} for drawing ID ${drawingId}: ${formatModerationScores(moderationResult.category_scores)}`);
+
+    const moderationStatus = flagged ? "rejected" : safeStatus;
     const { error } = await supabase
       .from("drawings")
       .update({ moderation_status: moderationStatus })
@@ -157,12 +192,28 @@ async function moderateDrawingImage(drawingId, imageInput) {
       throw new Error(`Could not store moderation result: ${error.message}`);
     }
 
-    console.log(`[Moderation] ${flagged ? "Rejected" : "Approved"} drawing ID ${drawingId} ...`);
+    const action = moderationStatus === "rejected"
+      ? "Rejected"
+      : moderationStatus === "approved"
+        ? "Approved"
+        : "Safe text, keeping pending";
+    console.log(`[Moderation] ${action} drawing ID ${drawingId} ...`);
     return moderationStatus;
   } catch (error) {
     console.error(`[Moderation] Failed, keeping pending drawing ID ${drawingId}:`, error.message);
     return "pending";
   }
+}
+
+async function moderateDrawingImage(drawingId, imageInput) {
+  return moderateDrawingContent(drawingId, [{
+    type: "image_url",
+    image_url: { url: imageInput }
+  }], "image");
+}
+
+async function moderateDrawingReflection(drawingId, reflectionText, safeStatus) {
+  return moderateDrawingContent(drawingId, reflectionText, "reflection", safeStatus);
 }
 
 app.get("/api/drawings", async (req, res) => {
@@ -359,10 +410,13 @@ app.patch("/api/drawings/:id", async (req, res) => {
   if (hasReflectionText && reflection_text !== null && typeof reflection_text !== "string") {
     return res.status(400).json({ error: "Invalid reflection text." });
   }
+  const normalizedReflectionText = hasReflectionText && typeof reflection_text === "string"
+    ? reflection_text.trim() || null
+    : reflection_text;
 
   const { data: existing, error: selectError } = await supabase
     .from("drawings")
-    .select("id, created_at, drawing, image_url, thumb_url, reflection_text")
+    .select("id, created_at, drawing, image_url, thumb_url, reflection_text, moderation_status")
     .eq("id", req.params.id)
     .single();
 
@@ -380,20 +434,45 @@ app.patch("/api/drawings/:id", async (req, res) => {
     else updatedDrawing.tag = tag;
   }
   if (hasWeight) updatedDrawing.weight = Number(weight);
-  if (hasReflectionText) updatedDrawing.reflection_text = reflection_text || null;
+  if (hasReflectionText) updatedDrawing.reflection_text = normalizedReflectionText || null;
 
   const updateData = { drawing: updatedDrawing };
-  if (hasReflectionText) updateData.reflection_text = reflection_text || null;
+  const blockedReflectionCategory = hasReflectionText
+    ? findBlockedReflectionCategory(normalizedReflectionText)
+    : null;
+  const shouldModerateReflection = Boolean(normalizedReflectionText)
+    && !blockedReflectionCategory
+    && existing.moderation_status !== "rejected";
+
+  if (hasReflectionText) {
+    updateData.reflection_text = normalizedReflectionText || null;
+    if (blockedReflectionCategory) updateData.moderation_status = "rejected";
+    else if (shouldModerateReflection) updateData.moderation_status = "pending";
+  }
 
   const { data, error } = await supabase
     .from("drawings")
     .update(updateData)
     .eq("id", req.params.id)
-    .select("id, created_at, drawing, image_url, thumb_url, reflection_text")
+    .select("id, created_at, drawing, image_url, thumb_url, reflection_text, moderation_status")
     .single();
 
   if (error) {
     return res.status(500).json({ error: error.message });
+  }
+
+  if (blockedReflectionCategory) {
+    console.log(`[Moderation] Rejected reflection for drawing ID ${data.id}: blocked ${blockedReflectionCategory} keyword.`);
+    return res.json(attachDatabaseFields(data));
+  }
+
+  if (shouldModerateReflection) {
+    const safeStatus = existing.moderation_status === "pending" ? "pending" : "approved";
+    const moderationStatus = await moderateDrawingReflection(data.id, normalizedReflectionText, safeStatus);
+    return res.json(attachDatabaseFields({
+      ...data,
+      moderation_status: moderationStatus
+    }));
   }
 
   return res.json(attachDatabaseFields(data));

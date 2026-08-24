@@ -5849,8 +5849,23 @@ async function handleReflectionChoice(shouldSaveText) {
     let textValue = shouldSaveText && reflectionTextArea
       ? reflectionTextArea.value().trim()
       : "";
-    await updateDrawingReflection(reflectionSavedDrawing, textValue || null);
+    let updatedDrawing = await updateDrawingReflection(reflectionSavedDrawing, textValue || null);
     reflectionSavedDrawing.reflection_text = textValue || null;
+    if (updatedDrawing && updatedDrawing.moderation_status !== undefined) {
+      reflectionSavedDrawing.moderation_status = updatedDrawing.moderation_status;
+    }
+    if (!isDrawingPubliclyVisible(reflectionSavedDrawing)) {
+      let removedIndex = archive.findIndex(drawing => drawing && drawing.dbId === reflectionSavedDrawing.dbId);
+      if (removedIndex >= 0) {
+        archive.splice(removedIndex, 1);
+        selectedApple = null;
+        selectedAppleIndex = -1;
+        invalidateAverageAppleCache();
+        generateDrawBackgroundApplesLayout();
+        generateWallMemoryFieldLayout();
+        markStackDirty();
+      }
+    }
     saveArchive();
     closeReflectionModalAndAdvance();
   } catch (error) {
