@@ -259,6 +259,7 @@ function setup() {
 }
 
 function draw() {
+  removeNonPublicDrawingsFromArchive();
   updatePerformanceFrameRate();
   background(bgCol);
   applyCanvasTypography();
@@ -418,6 +419,9 @@ function createInterface() {
     page = "archiveWall";
     resetArchivePan();
     generateArchiveWallLayout();
+    loadArchive().then(refreshArchiveViews).catch(error => {
+      console.warn("Could not refresh the public archive:", error);
+    });
   });
 
   backBtn = createButton("Back");
@@ -436,6 +440,9 @@ function createInterface() {
     page = "archiveWall";
     resetArchivePan();
     generateArchiveWallLayout();
+    loadArchive().then(refreshArchiveViews).catch(error => {
+      console.warn("Could not refresh the public wall:", error);
+    });
   });
 
   layerBtn = createButton("Layer");
@@ -5939,6 +5946,7 @@ function advancePrompt() {
 }
 
 function saveArchive() {
+  removeNonPublicDrawingsFromArchive();
   try {
     localStorage.setItem(storageKey, JSON.stringify(archive));
   } catch (error) {
@@ -5951,6 +5959,25 @@ function isDrawingPubliclyVisible(drawing) {
     drawing &&
     (drawing.moderation_status === "approved" || drawing.moderation_status == null)
   );
+}
+
+function removeNonPublicDrawingsFromArchive() {
+  if (!Array.isArray(archive) || !archive.some(drawing => !isDrawingPubliclyVisible(drawing))) {
+    return false;
+  }
+
+  archive = archive.filter(isDrawingPubliclyVisible);
+  if (selectedApple && !isDrawingPubliclyVisible(selectedApple)) {
+    selectedApple = null;
+    selectedAppleIndex = -1;
+  }
+  drawBackgroundApplesLayout = [];
+  wallFieldLayout = [];
+  archiveWallLayout = [];
+  clearGridMiniCache();
+  invalidateAverageAppleCache();
+  markStackDirty();
+  return true;
 }
 
 function toggleDrawingOutlier(index) {
@@ -6009,31 +6036,11 @@ async function loadArchive() {
       console.warn("Cloud archive request failed:", await response.text());
     }
   } catch (error) {
-    console.warn("Could not load archive from server. Falling back to localStorage:", error);
+    console.warn("Could not load archive from server. Keeping the public archive hidden:", error);
   }
-
-  try {
-    let saved = localStorage.getItem(storageKey);
-
-    if (!saved) {
-      for (let key of oldStorageKeys) {
-        saved = localStorage.getItem(key);
-        if (saved) break;
-      }
-    }
-
-    if (saved) {
-      archive = JSON.parse(saved)
-        .map(normalizeDrawingData)
-        .filter(isDrawingPubliclyVisible);
-      saveArchive();
-    } else {
-      archive = [];
-    }
-  } catch (error) {
-    console.warn("Could not load archive from localStorage:", error);
-    archive = [];
-  }
+  archive = [];
+  selectedApple = null;
+  selectedAppleIndex = -1;
 }
 
 function selectArchiveDrawing(index) {

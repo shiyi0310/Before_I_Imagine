@@ -13,19 +13,39 @@ const IMAGE_SEXUAL_REJECT_THRESHOLD = 0.12;
 const BLOCKED_REFLECTION_PATTERNS = [
   {
     category: "sexual",
-    pattern: /\b(?:sex|sexual|porn|pornography|porno|nude|naked|penis|dick|cock|vagina|pussy|boobs?|breasts?|blowjob|masturbat(?:e|ion|ing))\b/i
+    pattern: /\b(?:sex|sexual|porn(?:ography)?|porno|nude|nudity|naked|topless|nsfw|hentai|xxx|erotic(?:a)?|penis|dick|cock|vagina|pussy|boobs?|tits|titties|genitals?|anus|anal|blowjob|handjob|oral\s+sex|intercourse|orgasm|semen|masturbat(?:e|ion|ing)|rape|raped|raping|sexual\s+assault|child\s+porn|pedo(?:phile)?)\b/i
   },
   {
     category: "sexual",
-    pattern: /(?:色情|黄色内容|黄色网站|黄网|黄片|性爱|做爱|裸体|裸照|阴茎|鸡巴|屌|阴道|逼|乳房|奶子)/i
+    pattern: /(?:色情|情色|黄色内容|黄色网站|黄网|黄片|成人内容|成人视频|成人影片|春宫|性爱|做爱|性行为|裸体|裸照|全裸|半裸|露乳|裸胸|性器官|生殖器|阴茎|鸡巴|屌|阴道|奶子|乳头|自慰|手淫|口交|肛交|精液|射精|高潮|强奸|性侵|猥亵|儿童色情|未成年人?性行为)/i
+  },
+  {
+    category: "sexual",
+    pattern: /(?:\bs[\s._*·•-]*e[\s._*·•-]*x\b|\bp[\s._*·•-]*[o0][\s._*·•-]*r[\s._*·•-]*n\b|\bn[\s._*·•-]*s[\s._*·•-]*f[\s._*·•-]*w\b|色[\s._*·•-]*情|性[\s._*·•-]*爱|裸[\s._*·•-]*体)/i
+  },
+  {
+    category: "harassment",
+    pattern: /\b(?:fuck(?:ing|er|ed)?|motherfucker|bitch|cunt|asshole|tmd)\b/i
+  },
+  {
+    category: "harassment",
+    pattern: /(?:他妈的|妈的|婊子|傻逼|我操|卧槽|操你(?:妈|爸|爹|娘)?|草泥马|艹|肏)/i
   },
   {
     category: "violence",
-    pattern: /\b(?:blood|bloody|gore|gory|murder|murdered|killing|killed|kill)\b/i
+    pattern: /\b(?:blood|bloody|gore|gory|murder(?:ed|ing)?|kill(?:ed|ing)?|stab(?:bed|bing)?|shoot(?:ing)?|shot|behead(?:ed|ing)?|decapitat(?:e|ed|ing|ion)|dismember(?:ed|ing|ment)?|corpse|massacre|tortur(?:e|ed|ing))\b/i
   },
   {
     category: "violence",
-    pattern: /(?:血腥|流血|暴力|谋杀|杀人|杀死|尸体|肢解)/i
+    pattern: /(?:血腥|鲜血|流血|暴力|谋杀|杀人|杀死|尸体|肢解|刺杀|枪杀|砍头|斩首|虐杀|爆头|酷刑)/i
+  },
+  {
+    category: "self-harm",
+    pattern: /\b(?:suicide|suicidal|self[\s._-]*harm|cut[\s._-]+myself|overdose|hang[\s._-]+myself)\b/i
+  },
+  {
+    category: "self-harm",
+    pattern: /(?:自杀|自残|割腕|跳楼|上吊|吞药|服毒|轻生)/i
   }
 ];
 
@@ -38,6 +58,10 @@ const supabase = supabaseUrl && supabaseServiceKey
 
 app.use(cors());
 app.use(express.json({ limit: "50mb" }));
+app.use("/api", (req, res, next) => {
+  res.set("Cache-Control", "no-store");
+  next();
+});
 
 // Serve index.html, sketch.js, style.css, p5.js, and other local assets.
 app.use(express.static(__dirname));
@@ -129,7 +153,13 @@ async function uploadDrawingImage(dataURL, prefix, drawingId) {
 
 function findBlockedReflectionCategory(text) {
   if (typeof text !== "string" || !text.trim()) return null;
-  const match = BLOCKED_REFLECTION_PATTERNS.find(item => item.pattern.test(text));
+  const normalizedText = text
+    .normalize("NFKC")
+    .replace(/[\u200B-\u200D\u2060\uFEFF]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+  const match = BLOCKED_REFLECTION_PATTERNS.find(item => item.pattern.test(normalizedText));
   return match ? match.category : null;
 }
 
