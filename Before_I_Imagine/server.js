@@ -7,7 +7,7 @@ const { createClient } = require("@supabase/supabase-js");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const OPENAI_MODERATION_MODEL = "omni-moderation-latest";
+const OPENAI_MODERATION_MODEL = "omni-moderation-2024-09-26";
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY;
