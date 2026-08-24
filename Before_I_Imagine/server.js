@@ -107,15 +107,15 @@ async function uploadDrawingImage(dataURL, prefix, drawingId) {
   return data && data.publicUrl ? data.publicUrl : null;
 }
 
-async function moderateDrawingImage(drawingId, imageUrl) {
+async function moderateDrawingImage(drawingId, imageInput) {
   console.log(`[Moderation] Checking drawing ID ${drawingId} ...`);
 
   if (!process.env.OPENAI_API_KEY) {
     console.error(`[Moderation] Failed, keeping pending drawing ID ${drawingId}: OPENAI_API_KEY is not configured.`);
     return "pending";
   }
-  if (!imageUrl) {
-    console.error(`[Moderation] Failed, keeping pending drawing ID ${drawingId}: no uploaded image URL.`);
+  if (!imageInput) {
+    console.error(`[Moderation] Failed, keeping pending drawing ID ${drawingId}: no image input.`);
     return "pending";
   }
 
@@ -130,7 +130,7 @@ async function moderateDrawingImage(drawingId, imageUrl) {
         model: OPENAI_MODERATION_MODEL,
         input: [{
           type: "image_url",
-          image_url: { url: imageUrl }
+          image_url: { url: imageInput }
         }]
       }),
       signal: AbortSignal.timeout(20000)
@@ -275,7 +275,7 @@ app.post("/api/drawings", async (req, res) => {
     return res.status(500).json({ error: error.message });
   }
 
-  const moderationStatus = await moderateDrawingImage(data.id, thumbUrl);
+  const moderationStatus = await moderateDrawingImage(data.id, body.thumbDataUrl || thumbUrl);
   return res.status(201).json(attachDatabaseFields({
     ...data,
     moderation_status: moderationStatus
