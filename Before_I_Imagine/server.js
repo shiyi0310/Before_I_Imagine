@@ -8,6 +8,8 @@ const { createClient } = require("@supabase/supabase-js");
 const app = express();
 const PORT = process.env.PORT || 3000;
 const OPENAI_MODERATION_MODEL = "omni-moderation-2024-09-26";
+const IMAGE_SEXUAL_PENDING_THRESHOLD = 0.09;
+const IMAGE_SEXUAL_REJECT_THRESHOLD = 0.12;
 const BLOCKED_REFLECTION_PATTERNS = [
   {
     category: "sexual",
@@ -182,7 +184,26 @@ async function moderateDrawingContent(drawingId, input, inputLabel, safeStatus =
 
     console.log(`[Moderation] Scores ${inputLabel} for drawing ID ${drawingId}: ${formatModerationScores(moderationResult.category_scores)}`);
 
-    const moderationStatus = flagged ? "rejected" : safeStatus;
+    const sexualScore = moderationResult.category_scores
+      && typeof moderationResult.category_scores.sexual === "number"
+      ? moderationResult.category_scores.sexual
+      : 0;
+    const imageSexualRejected = inputLabel === "image"
+      && sexualScore >= IMAGE_SEXUAL_REJECT_THRESHOLD;
+    const imageSexualPending = inputLabel === "image"
+      && sexualScore >= IMAGE_SEXUAL_PENDING_THRESHOLD
+      && sexualScore < IMAGE_SEXUAL_REJECT_THRESHOLD;
+    const moderationStatus = flagged || imageSexualRejected
+      ? "rejected"
+      : imageSexualPending
+        ? "pending"
+        : safeStatus;
+
+    if (imageSexualRejected) {
+      console.log(`[Moderation] Rejected drawing ID ${drawingId}: image sexual score ${sexualScore.toFixed(4)} >= ${IMAGE_SEXUAL_REJECT_THRESHOLD}.`);
+    } else if (imageSexualPending) {
+      console.log(`[Moderation] Keeping drawing ID ${drawingId} pending: image sexual score ${sexualScore.toFixed(4)} is between ${IMAGE_SEXUAL_PENDING_THRESHOLD} and ${IMAGE_SEXUAL_REJECT_THRESHOLD}.`);
+    }
     const { error } = await supabase
       .from("drawings")
       .update({ moderation_status: moderationStatus })
@@ -196,7 +217,7 @@ async function moderateDrawingContent(drawingId, input, inputLabel, safeStatus =
       ? "Rejected"
       : moderationStatus === "approved"
         ? "Approved"
-        : "Safe text, keeping pending";
+        : "Pending review";
     console.log(`[Moderation] ${action} drawing ID ${drawingId} ...`);
     return moderationStatus;
   } catch (error) {
