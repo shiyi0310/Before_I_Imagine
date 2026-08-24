@@ -5731,16 +5731,18 @@ async function saveCurrentDrawing() {
   };
   drawingData.preview = createDrawingPreviewDataURL(drawingData, 260, 210);
 
-  archive.push(drawingData);
-  saveArchive();
-  invalidateAverageAppleCache();
-  if (!isMobileScreen() || mobileArchiveReady) {
-    generateDrawBackgroundApplesLayout();
-  }
-  markStackDirty();
   await saveDrawingToCloud(drawingData);
   if (!drawingData.dbId) {
     return false;
+  }
+  if (isDrawingPubliclyVisible(drawingData)) {
+    archive.push(drawingData);
+    saveArchive();
+    invalidateAverageAppleCache();
+    if (!isMobileScreen() || mobileArchiveReady) {
+      generateDrawBackgroundApplesLayout();
+    }
+    markStackDirty();
   }
   registerReportPersonalDrawing(drawingData);
 
@@ -5929,6 +5931,13 @@ function saveArchive() {
   }
 }
 
+function isDrawingPubliclyVisible(drawing) {
+  return Boolean(
+    drawing &&
+    (drawing.moderation_status === "approved" || drawing.moderation_status == null)
+  );
+}
+
 function toggleDrawingOutlier(index) {
   let drawing = archive[index];
   if (!drawing) return;
@@ -5975,7 +5984,9 @@ async function loadArchive() {
     if (response.ok) {
       const cloudArchive = await response.json();
       if (Array.isArray(cloudArchive)) {
-        archive = cloudArchive.map(normalizeDrawingData).filter(Boolean);
+        archive = cloudArchive
+          .map(normalizeDrawingData)
+          .filter(isDrawingPubliclyVisible);
         saveArchive();
         return;
       }
@@ -5997,7 +6008,9 @@ async function loadArchive() {
     }
 
     if (saved) {
-      archive = JSON.parse(saved).map(normalizeDrawingData).filter(Boolean);
+      archive = JSON.parse(saved)
+        .map(normalizeDrawingData)
+        .filter(isDrawingPubliclyVisible);
       saveArchive();
     } else {
       archive = [];
@@ -6074,11 +6087,11 @@ async function saveDrawingToCloud(drawingData) {
       drawingData.dbId = saved.dbId;
       drawingData.image_url = saved.image_url || null;
       drawingData.thumb_url = saved.thumb_url || null;
-      saveArchive();
+      drawingData.moderation_status = saved.moderation_status || "pending";
     }
     return saved || null;
   } catch (error) {
-    console.warn("Could not save drawing to server. It is still saved locally:", error);
+    console.warn("Could not save drawing to server:", error);
   }
   return null;
 }

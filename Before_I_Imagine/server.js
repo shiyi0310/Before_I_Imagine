@@ -1,3 +1,5 @@
+require("dotenv").config();
+
 const express = require("express");
 const cors = require("cors");
 const path = require("path");
@@ -5,6 +7,7 @@ const { createClient } = require("@supabase/supabase-js");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const OPENAI_MODERATION_MODEL = "omni-moderation-latest";
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY;
@@ -37,6 +40,7 @@ function attachDatabaseFields(row) {
     dbCreatedAt: row.created_at,
     image_url: row.image_url || null,
     thumb_url: row.thumb_url || null,
+    moderation_status: row.moderation_status || null,
     reflection_text: row.reflection_text || drawing.reflection_text || null
   };
 }
@@ -61,6 +65,7 @@ function attachLightDatabaseFields(row) {
     createdAt: light.createdAt || row.created_at,
     image_url: row.image_url || null,
     thumb_url: row.thumb_url || null,
+    moderation_status: row.moderation_status || null,
     reflection_text: row.reflection_text || light.reflection_text || null
   };
 }
@@ -102,6 +107,64 @@ async function uploadDrawingImage(dataURL, prefix, drawingId) {
   return data && data.publicUrl ? data.publicUrl : null;
 }
 
+async function moderateDrawingImage(drawingId, imageUrl) {
+  console.log(`[Moderation] Checking drawing ID ${drawingId} ...`);
+
+  if (!process.env.OPENAI_API_KEY) {
+    console.error(`[Moderation] Failed, keeping pending drawing ID ${drawingId}: OPENAI_API_KEY is not configured.`);
+    return "pending";
+  }
+  if (!imageUrl) {
+    console.error(`[Moderation] Failed, keeping pending drawing ID ${drawingId}: no uploaded image URL.`);
+    return "pending";
+  }
+
+  try {
+    const response = await fetch("https://api.openai.com/v1/moderations", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        model: OPENAI_MODERATION_MODEL,
+        input: [{
+          type: "image_url",
+          image_url: { url: imageUrl }
+        }]
+      }),
+      signal: AbortSignal.timeout(20000)
+    });
+
+    if (!response.ok) {
+      const errorBody = await response.text();
+      throw new Error(`OpenAI Moderation API returned ${response.status}: ${errorBody.slice(0, 300)}`);
+    }
+
+    const result = await response.json();
+    const flagged = result && result.results && result.results[0] && result.results[0].flagged;
+    if (typeof flagged !== "boolean") {
+      throw new Error("OpenAI Moderation API returned an unexpected response.");
+    }
+
+    const moderationStatus = flagged ? "rejected" : "approved";
+    const { error } = await supabase
+      .from("drawings")
+      .update({ moderation_status: moderationStatus })
+      .eq("id", drawingId);
+
+    if (error) {
+      throw new Error(`Could not store moderation result: ${error.message}`);
+    }
+
+    console.log(`[Moderation] ${flagged ? "Rejected" : "Approved"} drawing ID ${drawingId} ...`);
+    return moderationStatus;
+  } catch (error) {
+    console.error(`[Moderation] Failed, keeping pending drawing ID ${drawingId}:`, error.message);
+    return "pending";
+  }
+}
+
 app.get("/api/drawings", async (req, res) => {
   if (!supabase) {
     return res.status(500).json({
@@ -111,7 +174,8 @@ app.get("/api/drawings", async (req, res) => {
 
   const { data, error } = await supabase
     .from("drawings")
-    .select("id, created_at, drawing, image_url, thumb_url, reflection_text")
+    .select("id, created_at, drawing, image_url, thumb_url, reflection_text, moderation_status")
+    .or("moderation_status.eq.approved,moderation_status.is.null")
     .order("created_at", { ascending: true });
 
   if (error) {
@@ -131,7 +195,8 @@ app.get("/api/drawings/missing-images", async (req, res) => {
   const limit = Math.min(Math.max(Number(req.query.limit) || 10, 1), 25);
   const { data, error, count } = await supabase
     .from("drawings")
-    .select("id, created_at, drawing, image_url, thumb_url, reflection_text", { count: "exact" })
+    .select("id, created_at, drawing, image_url, thumb_url, reflection_text, moderation_status", { count: "exact" })
+    .or("moderation_status.eq.approved,moderation_status.is.null")
     .or("image_url.is.null,thumb_url.is.null")
     .order("created_at", { ascending: true })
     .limit(limit);
@@ -155,8 +220,9 @@ app.get("/api/drawings/:id", async (req, res) => {
 
   const { data, error } = await supabase
     .from("drawings")
-    .select("id, created_at, drawing, image_url, thumb_url, reflection_text")
+    .select("id, created_at, drawing, image_url, thumb_url, reflection_text, moderation_status")
     .eq("id", req.params.id)
+    .or("moderation_status.eq.approved,moderation_status.is.null")
     .single();
 
   if (error) {
@@ -195,15 +261,25 @@ app.post("/api/drawings", async (req, res) => {
 
   const { data, error } = await supabase
     .from("drawings")
-    .insert([{ drawing: storedDrawing, image_url: imageUrl, thumb_url: thumbUrl, reflection_text: storedDrawing.reflection_text || null }])
-    .select("id, created_at, drawing, image_url, thumb_url, reflection_text")
+    .insert([{
+      drawing: storedDrawing,
+      image_url: imageUrl,
+      thumb_url: thumbUrl,
+      reflection_text: storedDrawing.reflection_text || null,
+      moderation_status: "pending"
+    }])
+    .select("id, created_at, drawing, image_url, thumb_url, reflection_text, moderation_status")
     .single();
 
   if (error) {
     return res.status(500).json({ error: error.message });
   }
 
-  return res.status(201).json(attachDatabaseFields(data));
+  const moderationStatus = await moderateDrawingImage(data.id, imageUrl);
+  return res.status(201).json(attachDatabaseFields({
+    ...data,
+    moderation_status: moderationStatus
+  }));
 });
 
 app.patch("/api/drawings/:id/images", async (req, res) => {
