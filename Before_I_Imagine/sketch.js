@@ -5629,6 +5629,7 @@ function isClickOnDrawingDomControl(x, y) {
 
   for (let control of controls) {
     if (!control) continue;
+    if (control.elt && window.getComputedStyle(control.elt).display === "none") continue;
     let bx = control.x || 0;
     let by = control.y || 0;
     let bw = control.width || 0;
