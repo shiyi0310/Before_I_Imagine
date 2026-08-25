@@ -4,6 +4,10 @@
 // localStorage + JSON export
 // High-resolution version
 
+const IS_SEPARATE_DRAW_WINDOW = typeof window !== "undefined" &&
+  new URLSearchParams(window.location.search).get("view") === "draw";
+const DRAW_WINDOW_SYNC_KEY = "beforeIImagineDrawWindowArchiveChanged";
+
 let page = "draw";
 // pages: "draw", "archiveWall", "archiveGrid", "layer", "stack"
 
@@ -87,6 +91,8 @@ let clearBtn;
 let submitBtn;
 let nextPromptBtn;
 let archiveBtn;
+let openDrawWindowBtn;
+let startNewDrawingBtn;
 
 let backBtn;
 let gridBtn;
@@ -95,6 +101,8 @@ let layerBtn;
 let stackBtn;
 let exportBtn;
 let clearArchiveBtn;
+let separateDrawCompleted = false;
+let drawWindowArchiveRefreshTimer = null;
 
 let startTime;
 
@@ -210,6 +218,78 @@ let renderDebugLastLog = 0;
 let archiveIdleTimeoutId = null;
 let activeTimerCount = 0;
 
+function getPreferredCanvasPixelDensity() {
+  let density = typeof window !== "undefined" && Number.isFinite(window.devicePixelRatio)
+    ? window.devicePixelRatio
+    : displayDensity();
+  return Math.min(Math.max(Math.round(density || 1), 1), 2);
+}
+
+function syncMainCanvasCssSize() {
+  if (!mainCanvas || !mainCanvas.elt) return;
+  mainCanvas.elt.style.width = `${width}px`;
+  mainCanvas.elt.style.height = `${height}px`;
+  mainCanvas.elt.style.touchAction = "none";
+}
+
+function setupDrawWindowArchiveSync() {
+  if (typeof window === "undefined" || IS_SEPARATE_DRAW_WINDOW) return;
+  window.addEventListener("storage", event => {
+    if (event.key !== DRAW_WINDOW_SYNC_KEY) return;
+    if (drawWindowArchiveRefreshTimer) clearTimeout(drawWindowArchiveRefreshTimer);
+    drawWindowArchiveRefreshTimer = setTimeout(async () => {
+      drawWindowArchiveRefreshTimer = null;
+      await loadArchive();
+      refreshArchiveViews();
+    }, 120);
+  });
+}
+
+function notifyMainWindowArchiveChanged() {
+  if (!IS_SEPARATE_DRAW_WINDOW || typeof window === "undefined") return;
+  try {
+    localStorage.setItem(DRAW_WINDOW_SYNC_KEY, `${Date.now()}:${Math.random()}`);
+  } catch (error) {
+    console.warn("Could not notify the main exhibition window:", error);
+  }
+}
+
+function openSeparateDrawWindow() {
+  let drawUrl = new URL(window.location.href);
+  drawUrl.searchParams.set("view", "draw");
+  drawUrl.hash = "";
+
+  let drawWindow = window.open(
+    drawUrl.toString(),
+    "beforeIImagineDrawWindow",
+    "popup=yes,width=1024,height=768,resizable=yes,scrollbars=no"
+  );
+  if (!drawWindow) {
+    alert("The DRAW window was blocked. Please allow pop-ups for this site and try again.");
+    return;
+  }
+  drawWindow.focus();
+}
+
+function startNewDrawingSession() {
+  if (!IS_SEPARATE_DRAW_WINDOW) return;
+  promptIndex = 0;
+  page = "draw";
+  modalOpen = true;
+  separateDrawCompleted = false;
+  reflectionModalOpen = false;
+  reflectionSavedDrawing = null;
+  reflectionError = "";
+  reflectionUpdating = false;
+  if (reflectionTextArea) reflectionTextArea.value("");
+  clearDrawing();
+  startTime = millis();
+  lastButtonVisibilityKey = "";
+  layoutInterface();
+  updateButtonVisibility();
+  requestRender("new-draw-session");
+}
+
 function setup() {
   document.body.style.margin = "0";
   document.body.style.overflow = "hidden";
@@ -222,10 +302,19 @@ function setup() {
   document.body.style.userSelect = "none";
   document.body.style.webkitUserSelect = "none";
 
-  pd = min(displayDensity(), 2);
+  if (IS_SEPARATE_DRAW_WINDOW) {
+    document.body.classList.add("draw-window-mode");
+    document.title = "Before I Imagine — DRAW";
+    page = "draw";
+    modalOpen = true;
+    drawSidebarCollapsed = true;
+  }
+
+  pd = getPreferredCanvasPixelDensity();
   pixelDensity(pd);
 
   mainCanvas = createCanvas(windowWidth, windowHeight);
+  syncMainCanvasCssSize();
   if (mainCanvas && mainCanvas.elt) {
     mainCanvas.elt.style.userSelect = "none";
     mainCanvas.elt.style.position = "relative";
@@ -240,14 +329,17 @@ function setup() {
   drawingLayer.clear();
   drawingLayer.smooth();
 
-  loadArchive().then(() => {
-    refreshArchiveViews();
-  }).catch((error) => {
-    console.warn("Cloud archive loading failed:", error);
-  });
+  if (!IS_SEPARATE_DRAW_WINDOW) {
+    loadArchive().then(() => {
+      refreshArchiveViews();
+    }).catch((error) => {
+      console.warn("Cloud archive loading failed:", error);
+    });
+  }
 
   createInterface();
   layoutInterface();
+  setupDrawWindowArchiveSync();
 
   startTime = millis();
   archiveLastInteractionTime = millis();
@@ -259,6 +351,9 @@ function setup() {
 }
 
 function draw() {
+  if (getPreferredCanvasPixelDensity() !== pd) {
+    windowResized();
+  }
   removeNonPublicDrawingsFromArchive();
   updatePerformanceFrameRate();
   background(bgCol);
@@ -412,6 +507,12 @@ function createInterface() {
   nextPromptBtn = createButton("Next<br>下一题");
   nextPromptBtn.mousePressed(nextPrompt);
 
+  openDrawWindowBtn = createButton("Open DRAW Window ↗<br>打开独立绘画窗口");
+  openDrawWindowBtn.mousePressed(openSeparateDrawWindow);
+
+  startNewDrawingBtn = createButton("Start New Drawing<br>开始下一位");
+  startNewDrawingBtn.mousePressed(startNewDrawingSession);
+
   createReflectionInterface();
 
   archiveBtn = createButton("Archive<br>档案库");
@@ -471,7 +572,8 @@ function createInterface() {
   let allBtns = [
   brushBtn, bucketBtn, eraserBtn, undoBtn,
   clearBtn, submitBtn, nextPromptBtn, archiveBtn,
-  backBtn, gridBtn, wallBtn, layerBtn, stackBtn, exportBtn
+  backBtn, gridBtn, wallBtn, layerBtn, stackBtn, exportBtn,
+  openDrawWindowBtn, startNewDrawingBtn
   ];
 
   for (let b of allBtns) {
@@ -606,6 +708,32 @@ function layoutInterface() {
     layerBtn.size(archiveNavW, 28);
     stackBtn.size(archiveNavW, 28);
     exportBtn.size(archiveNavW, 28);
+  }
+
+  if (openDrawWindowBtn) {
+    if (IS_SEPARATE_DRAW_WINDOW || mobile) {
+      openDrawWindowBtn.position(-9999, -9999);
+      openDrawWindowBtn.size(1, 1);
+    } else {
+      let sidebarW = getDrawSidebarWidth();
+      let launchW = sidebarW > 0 ? max(132, sidebarW - 44) : 218;
+      let launchX = sidebarW > 0 ? 22 : width - launchW - 24;
+      openDrawWindowBtn.position(launchX, height - 76);
+      openDrawWindowBtn.size(launchW, 52);
+      openDrawWindowBtn.style("font-size", "10px");
+      openDrawWindowBtn.style("line-height", "1.2");
+      openDrawWindowBtn.style("padding", "7px 10px");
+      openDrawWindowBtn.style("z-index", "220");
+    }
+  }
+
+  if (startNewDrawingBtn) {
+    let newSessionW = min(300, width - 40);
+    startNewDrawingBtn.position((width - newSessionW) / 2, height / 2 + 62);
+    startNewDrawingBtn.size(newSessionW, 56);
+    startNewDrawingBtn.style("font-size", "13px");
+    startNewDrawingBtn.style("padding", "9px 18px");
+    startNewDrawingBtn.style("z-index", "260");
   }
 
   layoutReflectionInterface();
@@ -859,12 +987,21 @@ function updatePromptFlowButtonLabel() {
 }
 
 function updateButtonVisibility() {
-  let visibilityKey = `${page}:${modalOpen}:${reflectionModalOpen}:${promptIndex}:${backgroundViewMode}`;
+  let visibilityKey = `${page}:${modalOpen}:${reflectionModalOpen}:${promptIndex}:${backgroundViewMode}:${separateDrawCompleted}:${drawSidebarCollapsed}`;
   if (visibilityKey === lastButtonVisibilityKey) return;
   lastButtonVisibilityKey = visibilityKey;
 
   updatePromptFlowButtonLabel();
   updateReflectionVisibility();
+
+  if (openDrawWindowBtn) {
+    if (!IS_SEPARATE_DRAW_WINDOW && !isMobileScreen() && page === "draw") openDrawWindowBtn.show();
+    else openDrawWindowBtn.hide();
+  }
+  if (startNewDrawingBtn) {
+    if (IS_SEPARATE_DRAW_WINDOW && separateDrawCompleted) startNewDrawingBtn.show();
+    else startNewDrawingBtn.hide();
+  }
 
   if (page === "draw") {
     if (modalOpen && !reflectionModalOpen) {
@@ -1043,7 +1180,12 @@ function drawImmersiveDrawingPage() {
   let p = prompts[promptIndex];
 
   drawPaperBackground();
-  if (!isMobileScreen()) {
+  if (IS_SEPARATE_DRAW_WINDOW && separateDrawCompleted) {
+    drawSeparateDrawCompletedScreen();
+    return;
+  }
+
+  if (!IS_SEPARATE_DRAW_WINDOW && !isMobileScreen()) {
     if (backgroundViewMode === "report") {
       drawAppleReportView();
     } else if (backgroundViewMode === "average") {
@@ -1058,7 +1200,7 @@ function drawImmersiveDrawingPage() {
     }
     drawDrawPageSidebar();
     drawBackgroundViewSwitcher();
-  } else if (mobileArchiveReady && !modalOpen) {
+  } else if (!IS_SEPARATE_DRAW_WINDOW && mobileArchiveReady && !modalOpen) {
     if (backgroundViewMode === "report") {
       drawAppleReportView();
     } else if (backgroundViewMode === "average") {
@@ -1084,13 +1226,13 @@ function drawImmersiveDrawingPage() {
     unclip();
 
     drawToolbarPanel();
-    drawDrawingModalClose();
+    if (!IS_SEPARATE_DRAW_WINDOW) drawDrawingModalClose();
     drawDrawingFooter();
-  } else if (backgroundViewMode !== "average" && backgroundViewMode !== "report") {
+  } else if (!IS_SEPARATE_DRAW_WINDOW && backgroundViewMode !== "average" && backgroundViewMode !== "report") {
     drawReopenDrawingButton();
   }
 
-  if (!modalOpen && backgroundViewMode === "wall") {
+  if (!IS_SEPARATE_DRAW_WINDOW && !modalOpen && backgroundViewMode === "wall") {
     drawSelectedApplePopup();
   }
 
@@ -1098,6 +1240,27 @@ function drawImmersiveDrawingPage() {
     drawReflectionModal();
   }
 
+}
+
+function drawSeparateDrawCompletedScreen() {
+  let centerY = height / 2 - 80;
+  noStroke();
+  fill(inkCol);
+  textAlign(CENTER, CENTER);
+  textSize(isMobileScreen() ? 18 : 24);
+  text("Drawing session complete", width / 2, centerY);
+  textSize(isMobileScreen() ? 15 : 18);
+  text("本次绘画已完成", width / 2, centerY + 34);
+
+  fill(mutedCol);
+  textSize(isMobileScreen() ? 10 : 12);
+  text(
+    "The submitted drawings are saved. Start a new session for the next participant.",
+    width / 2,
+    centerY + 82,
+    min(560, width - 60),
+    44
+  );
 }
 
 function drawReflectionModal() {
@@ -1164,7 +1327,7 @@ function getExpandedDrawSidebarWidth() {
 }
 
 function getDrawSidebarWidth() {
-  if (isMobileScreen() || drawSidebarCollapsed) return 0;
+  if (IS_SEPARATE_DRAW_WINDOW || isMobileScreen() || drawSidebarCollapsed) return 0;
   return getExpandedDrawSidebarWidth();
 }
 
@@ -4631,7 +4794,15 @@ function drawDrawingFooter() {
   noStroke();
   textAlign(CENTER);
   textSize(isMobileScreen() ? 9 : 13);
-  if (isMobileScreen()) {
+  if (IS_SEPARATE_DRAW_WINDOW) {
+    text(
+      isMobileScreen()
+        ? "Draw above. Submit when finished."
+        : "Draw in the area above. Complete all four prompts to finish this participant session.",
+      width / 2,
+      drawLayout.footerY + (isMobileScreen() ? 18 : 26)
+    );
+  } else if (isMobileScreen()) {
     text("Draw above. Submit when finished.", width / 2, drawLayout.footerY + 12);
     text(`${archive.length} drawings saved   已保存 ${archive.length} 张`, width / 2, drawLayout.footerY + 26);
   } else {
@@ -4645,17 +4816,41 @@ function drawDrawingFooter() {
 // MOUSE DRAWING
 // -------------------------
 
-function mousePressed() {
+function getCanvasInputPoint(event, fallbackX, fallbackY) {
+  if (!mainCanvas || !mainCanvas.elt) return { x: fallbackX, y: fallbackY };
+
+  let source = event;
+  if (event && event.touches && event.touches.length > 0) source = event.touches[0];
+  else if (event && event.changedTouches && event.changedTouches.length > 0) source = event.changedTouches[0];
+
+  let clientX = source && Number(source.clientX);
+  let clientY = source && Number(source.clientY);
+  if (!Number.isFinite(clientX) || !Number.isFinite(clientY)) {
+    return { x: fallbackX, y: fallbackY };
+  }
+
+  let rect = mainCanvas.elt.getBoundingClientRect();
+  if (!rect.width || !rect.height) return { x: fallbackX, y: fallbackY };
+
+  return {
+    x: (clientX - rect.left) * (width / rect.width),
+    y: (clientY - rect.top) * (height / rect.height)
+  };
+}
+
+function mousePressed(event) {
   if (isTopWallMode() && mouseButton !== LEFT) {
     requestRender("wall-non-left-press");
     return false;
   }
-  handlePointerPressed(mouseX, mouseY);
+  let point = getCanvasInputPoint(event, mouseX, mouseY);
+  handlePointerPressed(point.x, point.y);
   requestRender("mouse-pressed");
 }
 
-function mouseDragged() {
-  handlePointerDragged(mouseX, mouseY);
+function mouseDragged(event) {
+  let point = getCanvasInputPoint(event, mouseX, mouseY);
+  handlePointerDragged(point.x, point.y);
   requestRender("mouse-dragged");
 }
 
@@ -4673,7 +4868,7 @@ function mouseMoved() {
   }
 }
 
-function touchStarted() {
+function touchStarted(event) {
   requestRender("touch-started");
   if (reflectionModalOpen) {
     return true;
@@ -4685,8 +4880,9 @@ function touchStarted() {
   }
 
   if (touches.length > 0) {
-    let x = touches[0].x;
-    let y = touches[0].y;
+    let point = getCanvasInputPoint(event, touches[0].x, touches[0].y);
+    let x = point.x;
+    let y = point.y;
 
     if (page === "draw" && pointInsideUndoButton(x, y)) {
       return true;
@@ -4724,7 +4920,7 @@ function touchStarted() {
   return true;
 }
 
-function touchMoved() {
+function touchMoved(event) {
   requestRender("touch-moved");
   if (reflectionModalOpen) {
     return true;
@@ -4741,8 +4937,9 @@ function touchMoved() {
   }
 
   if (isTopWallMode() && isMobileScreen() && touches.length === 1 && isWallPanning) {
-    let x = touches[0].x;
-    let y = touches[0].y;
+    let point = getCanvasInputPoint(event, touches[0].x, touches[0].y);
+    let x = point.x;
+    let y = point.y;
     let dx = x - lastWallPanPoint.x;
     let dy = y - lastWallPanPoint.y;
     wallCamera.x += dx / wallCamera.zoom;
@@ -4757,8 +4954,9 @@ function touchMoved() {
   }
 
   if (touches.length > 0) {
-    let x = touches[0].x;
-    let y = touches[0].y;
+    let point = getCanvasInputPoint(event, touches[0].x, touches[0].y);
+    let x = point.x;
+    let y = point.y;
 
     if (page === "draw" && pointInsideUndoButton(x, y)) {
       return true;
@@ -4790,6 +4988,10 @@ function touchEnded() {
 
 function handlePointerPressed(x, y) {
   if (reflectionModalOpen) {
+    return true;
+  }
+
+  if (page === "draw" && isClickOnDrawingDomControl(x, y)) {
     return true;
   }
 
@@ -5069,6 +5271,8 @@ function pointInsideArchiveWallPopupClose(x, y) {
 }
 
 function handleDrawPageClick(x, y) {
+  if (IS_SEPARATE_DRAW_WINDOW) return false;
+
   if (isClickOnDrawSidebarToggle(x, y)) {
     toggleDrawSidebar();
     return true;
@@ -5417,7 +5621,11 @@ function getAppleCardAt(x, y) {
 
 function isClickOnDrawingDomControl(x, y) {
   if (!modalOpen) return false;
-  let controls = [colorPicker, sizeSlider, brushBtn, bucketBtn, eraserBtn, undoBtn, clearBtn, submitBtn, nextPromptBtn, archiveBtn];
+  let controls = [
+    colorPicker, sizeSlider, brushBtn, bucketBtn, eraserBtn, undoBtn,
+    clearBtn, submitBtn, nextPromptBtn, archiveBtn,
+    openDrawWindowBtn, startNewDrawingBtn
+  ];
 
   for (let control of controls) {
     if (!control) continue;
@@ -5752,6 +5960,7 @@ async function saveCurrentDrawing() {
     markStackDirty();
   }
   registerReportPersonalDrawing(drawingData);
+  notifyMainWindowArchiveChanged();
 
   return drawingData;
 }
@@ -5874,6 +6083,7 @@ async function handleReflectionChoice(shouldSaveText) {
       }
     }
     saveArchive();
+    notifyMainWindowArchiveChanged();
     closeReflectionModalAndAdvance();
   } catch (error) {
     console.warn("Could not save reflection:", error);
@@ -5931,6 +6141,20 @@ function advancePrompt() {
     modalOpen = true;
     clearDrawing();
     updatePromptFlowButtonLabel();
+    return;
+  }
+
+  if (IS_SEPARATE_DRAW_WINDOW) {
+    clearDrawing();
+    page = "draw";
+    modalOpen = false;
+    separateDrawCompleted = true;
+    selectedApple = null;
+    selectedAppleIndex = -1;
+    lastButtonVisibilityKey = "";
+    layoutInterface();
+    updateButtonVisibility();
+    requestRender("draw-session-complete");
     return;
   }
 
@@ -8155,7 +8379,13 @@ function exportArchiveJSON() {
 // -------------------------
 
 function windowResized() {
+  let nextDensity = getPreferredCanvasPixelDensity();
+  if (nextDensity !== pd) {
+    pd = nextDensity;
+    pixelDensity(pd);
+  }
   resizeCanvas(windowWidth, windowHeight);
+  syncMainCanvasCssSize();
   updateHeaderHeight();
 
   let oldLayer = drawingLayer;
