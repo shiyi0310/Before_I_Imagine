@@ -6160,6 +6160,8 @@ function advancePrompt() {
   }
 
   clearDrawing();
+  promptIndex = 0;
+  updatePromptFlowButtonLabel();
   page = "draw";
   modalOpen = false;
   backgroundViewMode = "archive";
